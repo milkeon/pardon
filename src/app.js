@@ -66,9 +66,9 @@ async function startCapture() {
     }
 
     setRecording(true);
-    setStatus('Recording started. Speak naturally to populate the raw STT field.');
+    setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
   } catch (error) {
-    setStatus(`Could not start recording: ${friendlyError(error)}`);
+    setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
 }
 
@@ -91,7 +91,7 @@ function stopCapture() {
   }
 
   setRecording(false);
-  setStatus('Recording stopped. Rewrite cards are updated from the current transcript.');
+  setStatus('녹음을 종료했습니다. 현재 원문 기준으로 재작성 카드가 갱신됩니다.');
 }
 
 function clearAll() {
@@ -103,7 +103,7 @@ function clearAll() {
   setTranscript('');
   setAudioUrl('');
   renderVariants();
-  setStatus('Cleared transcript, audio, and variant selection.');
+  setStatus('원문, 오디오, 그리고 선택 상태를 초기화했습니다.');
 }
 
 function onChunk(event) {
@@ -139,11 +139,11 @@ function onRecognitionResult(event) {
     setTranscript(normalizeWhitespace(`${state.transcript} ${state.interimTranscript}`));
   }
 
-  setStatus('Listening and transcribing.');
+  setStatus('음성을 듣고 STT로 변환하는 중입니다.');
 }
 
 function onRecognitionError(event) {
-  setStatus(`Speech recognition error: ${event.error}`);
+  setStatus(`음성 인식 오류: ${event.error}`);
 }
 
 function onRecognitionEnd() {
@@ -204,29 +204,29 @@ async function handleGenerateClicked() {
   const apiKey = normalizeWhitespace(els.apiKey.value);
 
   if (!transcript) {
-    setStatus('Add or record a transcript before generating rewrites.');
+    setStatus('원문을 먼저 추가하거나 녹음한 뒤 재작성해 주세요.');
     renderVariants();
     return;
   }
 
   if (!apiKey) {
-    setStatus('No API key provided. Using the local deterministic rewrite engine.');
+    setStatus('브라우저 API 키가 없어서 로컬 결정적 재작성 엔진을 사용합니다.');
     renderVariants();
     return;
   }
 
   els.generateButton.disabled = true;
-  setStatus('Generating rewrite variants with OpenAI...');
+  setStatus('브라우저에 내장된 OpenAI로 재작성 안을 생성하는 중입니다...');
 
   try {
     const remoteVariants = await generateRemoteVariants({ transcript, context, apiKey });
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
-    setStatus('Generated rewrite variants with OpenAI.');
+    setStatus('OpenAI로 재작성 안을 생성했습니다.');
   } catch (error) {
     state.variants = buildRewriteVariants(transcript, context);
     renderVariantCards(state.variants);
-    setStatus(`Remote generation failed, so the local fallback was used: ${friendlyError(error)}`);
+    setStatus(`원격 생성에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
     els.generateButton.disabled = false;
   }
@@ -240,16 +240,16 @@ async function copySelectedVariant() {
 
   try {
     await navigator.clipboard.writeText(selected?.text || '');
-    setStatus('Selected rewrite copied to clipboard.');
+    setStatus('선택한 재작성안을 클립보드에 복사했습니다.');
   } catch {
-    setStatus('Clipboard copy failed in this browser.');
+    setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
   }
 }
 
 function createSpeechRecognition() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
-    setStatus('SpeechRecognition is not supported in this browser. You can paste transcript text manually.');
+    setStatus('이 브라우저는 SpeechRecognition을 지원하지 않습니다. 원문을 직접 붙여넣어도 됩니다.');
     return null;
   }
 
@@ -274,7 +274,7 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
       messages: [
         {
           role: 'system',
-          content: 'Rewrite the transcript into exactly three alternatives. Return strict JSON with keys clean, polite, action. Keep the meaning and use the user context. Do not add commentary.'
+          content: '원문을 정확히 3개의 대안으로 다시 써 주세요. 키는 clean, polite, action만 허용하고, 의미를 유지하면서 사용자 맥락을 반영한 엄격한 JSON으로만 반환하세요. 설명 문구는 넣지 마세요.'
         },
         {
           role: 'user',
@@ -285,7 +285,7 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
   });
 
   if (!response.ok) {
-    throw new Error(`OpenAI request failed (${response.status})`);
+    throw new Error(`원격 생성 요청이 실패했습니다 (${response.status})`);
   }
 
   const payload = await response.json();
@@ -331,13 +331,13 @@ function updateSupportStatus() {
   const hasSpeechRecognition = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   els.supportStatus.textContent = [
-    hasRecorder ? 'MediaRecorder: supported' : 'MediaRecorder: unavailable',
-    hasSpeechRecognition ? 'SpeechRecognition: supported' : 'SpeechRecognition: unavailable'
+    hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
+    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨'
   ].join(' · ');
 }
 
 function setRecording(isRecording) {
-  els.recordingBadge.textContent = isRecording ? '● recording' : 'ready';
+  els.recordingBadge.textContent = isRecording ? '● 녹음 중' : '대기 중';
   els.recordingBadge.classList.toggle('is-recording', isRecording);
   els.startButton.disabled = isRecording;
   els.stopButton.disabled = !isRecording;

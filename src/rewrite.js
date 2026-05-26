@@ -1,7 +1,7 @@
 const DEFAULT_CONTEXT_HINTS = [
-  'clear',
-  'friendly',
-  'concise'
+  '명확함',
+  '친절함',
+  '간결함'
 ];
 
 const TRANSFORMERS = [
@@ -112,18 +112,18 @@ function makeActionable(text) {
 
   const sentences = base.split(/(?<=[.!?])\s+/).filter(Boolean);
   if (sentences.length > 1) {
-    return `Action plan:\n- ${sentences.join('\n- ')}`;
+    return `실행 계획:\n- ${sentences.join('\n- ')}`;
   }
-  return `Action plan: ${base}`;
+  return `실행 계획: ${base}`;
 }
 
 function contextSummary(context, hints) {
   const cleanContext = normalizeWhitespace(context);
   if (!cleanContext) {
-    return `context: ${hints.slice(0, 2).join(', ')}`;
+    return `맥락: ${hints.slice(0, 2).join(', ')}`;
   }
   const short = cleanContext.length > 90 ? `${cleanContext.slice(0, 87)}...` : cleanContext;
-  return `context: ${short}`;
+  return `맥락: ${short}`;
 }
 
 function finalizeVariantText(value) {

@@ -1,32 +1,34 @@
 # Pardon
 
-Pardon is a static browser app that records audio, shows raw speech-to-text output, and generates three selectable rewrite variants from the transcript.
+Pardon은 브라우저에서 오디오를 녹음하고, STT 원문을 보여주며, 그 원문을 바탕으로 3개의 재작성안을 선택할 수 있게 해주는 정적 웹앱입니다.
 
-## Features
+## 주요 기능
 
-- Browser audio recording with `MediaRecorder`
-- Live speech recognition in supported browsers using `SpeechRecognition` / `webkitSpeechRecognition`
-- Raw transcript display with manual editing fallback
-- Three context-aware rewrite variants
-- No backend required for the core demo
-- Lightweight pure-logic tests with Node's built-in test runner
+- `MediaRecorder`를 이용한 브라우저 오디오 녹음
+- 지원 브라우저에서 `SpeechRecognition` / `webkitSpeechRecognition`으로 실시간 음성 인식
+- 원문(STT) 표시 및 수동 수정 가능
+- 문맥을 반영한 3개의 재작성안 제공
+- 핵심 데모는 백엔드 없이 동작
+- Node 내장 테스트 러너로 가벼운 순수 로직 테스트 제공
 
-## Project structure
+## 프로젝트 구성
 
-- `index.html` — app shell
-- `styles.css` — visual design
-- `src/app.js` — browser UI and recording logic
-- `src/rewrite.js` — pure rewrite helpers used by the app and tests
-- `tests/rewrite.test.js` — Node test coverage for the pure logic
-- `server.js` — tiny static server for local preview
+- `index.html` — 앱 셸
+- `styles.css` — 화면 스타일
+- `src/app.js` — 브라우저 UI와 녹음 로직
+- `src/rewrite.js` — 앱과 테스트에서 사용하는 순수 재작성 로직
+- `tests/rewrite.test.js` — 순수 로직 테스트
+- `tests/markup.test.js` — 정적 마크업 스모크 테스트
+- `server.js` — 로컬 미리보기용 정적 서버
 
-## Requirements
+## 요구 사항
 
-- Node.js 20+ recommended
-- A browser that supports `MediaRecorder`
-- `SpeechRecognition` support for live STT, or manual transcript entry if unsupported
+- Node.js 20 이상 권장
+- `MediaRecorder`를 지원하는 브라우저
+- 실시간 STT를 쓰려면 `SpeechRecognition` 지원 브라우저 필요
+- 지원이 없으면 원문을 직접 입력해도 동작
 
-## Setup
+## 실행 방법
 
 ```bash
 cd /Users/milkeon/workspace/pardon
@@ -34,49 +36,49 @@ npm test
 npm start
 ```
 
-Then open the local URL shown in the terminal, typically `http://localhost:4173`.
+그다음 터미널에 표시되는 로컬 주소를 여시면 됩니다. 보통 `http://localhost:4173`입니다.
 
-## Usage
+## 사용 방법
 
-1. Click **Start recording**.
-2. Speak into your microphone.
-3. Review the raw transcript in the **Raw STT** field.
-4. Add a context hint if you want the rewrites to sound like a specific medium or tone.
-5. Click one of the three rewrite cards to select it.
-6. Use **Copy selected rewrite** to place the chosen version on your clipboard.
+1. **Start recording**을 누릅니다.
+2. 마이크로 말을 합니다.
+3. **Raw STT** 영역에서 원문을 확인합니다.
+4. 문체나 매체 느낌을 맞추고 싶으면 context hint를 추가합니다.
+5. 3개의 재작성 카드 중 하나를 눌러 선택합니다.
+6. **Copy selected rewrite**로 선택한 문장을 클립보드에 복사합니다.
 
-If your browser does not support live speech recognition, paste a transcript into the text area manually. The rewrite cards still work.
+브라우저가 실시간 음성 인식을 지원하지 않으면, 텍스트 영역에 원문을 직접 붙여넣어도 됩니다. 재작성 카드는 그대로 동작합니다.
 
-## Local verification
+## 로컬 검증
 
-Run the pure-logic tests:
+순수 로직 테스트 실행:
 
 ```bash
 npm test
 ```
 
-Start the static server:
+정적 서버 실행:
 
 ```bash
 npm start
 ```
 
-## GitHub Pages deployment
+## GitHub Pages 배포
 
-This project is plain static HTML/CSS/JS, so GitHub Pages can serve it directly from the repository root.
+이 프로젝트는 순수 정적 HTML/CSS/JS라서 GitHub Pages가 저장소 루트에서 바로 서비스할 수 있습니다.
 
-1. Create a GitHub repository named `pardon`.
-2. Push this project to the `main` branch.
-3. In GitHub, open **Settings → Pages**.
-4. Set **Build and deployment** to:
+1. `pardon` 이름의 GitHub 저장소를 만듭니다.
+2. 이 프로젝트를 `main` 브랜치로 푸시합니다.
+3. GitHub에서 **Settings → Pages**로 들어갑니다.
+4. **Build and deployment**를 다음처럼 설정합니다.
    - Source: `Deploy from a branch`
    - Branch: `main`
    - Folder: `/ (root)`
-5. Save the settings and wait for the Pages URL to become available.
+5. 설정을 저장하고 Pages URL이 만들어질 때까지 기다립니다.
 
-Because the app uses relative asset paths, it works from the repository root without a bundler.
+앱이 상대 경로 자산을 쓰기 때문에, 번들러 없이 저장소 루트에서 바로 동작합니다.
 
-## Notes
+## 비고
 
-- The rewrite logic is intentionally deterministic so the demo works without an API key.
-- The optional API key field is only for local experiments with a browser-side rewrite API. Do not ship real secrets in the frontend for a public deployment.
+- 재작성 로직은 데모가 API 키 없이도 동작하도록 의도적으로 결정적 방식으로 구현했습니다.
+- 선택 입력칸은 로컬 실험용입니다. 공개 배포에서 실제 비밀키를 프런트엔드에 두면 안 됩니다.
