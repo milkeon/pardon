@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pardon is a static browser app for recording speech, showing raw STT, and generating three rewrite variants." />
+    <title>Pardon</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./src/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Pardon</p>
+          <h1>Record speech, inspect raw STT, and pick a better rewrite.</h1>
+          <p class="lead">
+            A self-contained static demo for browser audio recording, speech-to-text capture,
+            and three context-aware rewrite options with no backend required.
+          </p>
+        </div>
+        <div class="status-pill" id="recording-badge">ready</div>
+      </section>
+
+      <section class="panel panel--controls">
+        <div class="control-row">
+          <button class="button button--primary" data-action="start-recording">Start recording</button>
+          <button class="button" data-action="stop-recording" disabled>Stop</button>
+          <button class="button" data-action="clear">Clear</button>
+          <button class="button button--ghost" data-action="copy">Copy selected rewrite</button>
+        </div>
+        <p class="support-line" id="support-status"></p>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel__header">
+            <h2>Raw STT</h2>
+            <span id="transcript-status">Ready to record.</span>
+          </div>
+          <label class="field">
+            <span>Transcript</span>
+            <textarea id="transcript" rows="10" placeholder="Your live transcript appears here. You can also paste text manually."></textarea>
+          </label>
+          <label class="field">
+            <span>Context hint</span>
+            <textarea id="context" rows="4" placeholder="Example: write this as a polite email to a customer. Focus on clarity and warmth."></textarea>
+          </label>
+          <div class="audio-box">
+            <span>Captured audio</span>
+            <audio id="audio-playback" controls hidden></audio>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel__header">
+            <h2>Rewrite variants</h2>
+            <button class="button button--small" data-action="generate">Regenerate</button>
+          </div>
+          <div id="variants-empty" class="empty-state" hidden>
+            Speak or paste a transcript to generate rewrite options.
+          </div>
+          <div id="variant-list" class="variant-list" aria-live="polite"></div>
+        </article>
+      </section>
+
+      <section class="panel panel--footer">
+        <label class="field field--inline">
+          <span>Optional browser API key</span>
+          <input id="api-key" type="password" placeholder="Not required for the local demo" />
+        </label>
+        <p class="fine-print">
+          Core demo runs entirely in the browser. If you later connect a rewrite API, keep the key client-side only for local experiments.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

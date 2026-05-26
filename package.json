@@ -1,0 +1,11 @@
+{
+  "name": "pardon",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pardon is a static browser app for recording speech, showing raw STT, and generating three rewrite variants.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
