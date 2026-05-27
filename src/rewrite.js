@@ -276,9 +276,6 @@ function summaryNote(profile, fallback) {
   if (profile.tone !== 'neutral') parts.push(profile.tone);
   if (profile.intent !== 'general') parts.push(profile.intent);
   if (profile.urgency === 'high') parts.push('긴급');
-  if (profile.mlFocus?.label && profile.mlFocus.confidence >= 0.45) {
-    parts.push(`ML:${profile.mlFocus.label}`);
-  }
 
   const note = parts.length ? parts.join(' · ') : fallback;
   return `맥락: ${note}`;
