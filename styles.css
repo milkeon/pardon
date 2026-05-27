@@ -307,6 +307,12 @@ h1 {
   justify-content: center;
 }
 
+.transcript-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .confirmation-panel {
   margin-top: 18px;
   padding-top: 18px;

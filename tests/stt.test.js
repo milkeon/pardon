@@ -49,3 +49,16 @@ test('mergeRecognitionResults는 공백 정규화 없이 원문 조각을 그대
 
   assert.equal(merged.transcript, 'A  B\nC');
 });
+
+test('mergeRecognitionResults는 1초 이상 공백 뒤의 새 음성에 줄바꿈을 넣는다', () => {
+  const merged = mergeRecognitionResults(
+    { segments: [{ transcript: '첫 문장', isFinal: true }], committedTranscript: '첫 문장' },
+    [{ transcript: '두 번째 문장', isFinal: true }],
+    0,
+    { insertLineBreak: true }
+  );
+
+  assert.equal(merged.transcript, '첫 문장\n두 번째 문장');
+  assert.deepEqual(merged.segments, [{ transcript: '\n두 번째 문장', isFinal: true }]);
+});
+

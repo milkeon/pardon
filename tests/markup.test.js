@@ -24,9 +24,11 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('autocorrect="off"'));
   assert.ok(!html.includes('문맥 힌트'));
   assert.ok(!html.includes('다시 생성'));
+  assert.ok(html.includes('class="transcript-actions"'));
+  assert.ok(html.indexOf('data-action="generate"') < html.indexOf('data-action="clear"'));
 });
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=confirm-llm-2'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-3'));
 });

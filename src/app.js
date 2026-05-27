@@ -1,7 +1,7 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-2';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-2';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-2';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-2';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-3';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-3';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-3';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-3';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -43,7 +43,9 @@ const state = {
   recognitionRestartTimer: null,
   toastTimer: null,
   isGenerating: false,
-  isSummarizing: false
+  isSummarizing: false,
+  pendingLineBreakBeforeNextSpeech: false,
+  audioVoiceActive: false
 };
 
 const SILENCE_TIMEOUT_MS = 60_000;
@@ -156,6 +158,8 @@ function clearSessionState() {
   state.readyForVariants = false;
   state.selectedVariantId = 'possibility-1';
   state.lastVoiceAt = 0;
+  state.pendingLineBreakBeforeNextSpeech = false;
+  state.audioVoiceActive = false;
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
 }
 
@@ -182,12 +186,14 @@ function onRecognitionResult(event) {
       committedTranscript: state.recognitionCommittedTranscript
     },
     recognitionResults,
-    event.resultIndex ?? 0
+    event.resultIndex ?? 0,
+    { insertLineBreak: state.pendingLineBreakBeforeNextSpeech }
   );
 
   state.recognitionSegments = merged.segments;
   state.recognitionCommittedTranscript = merged.committedTranscript;
   state.transcript = syncTranscriptDisplay(merged.transcript);
+  state.pendingLineBreakBeforeNextSpeech = false;
 
   setStatus('음성을 듣고 STT 원문을 즉시 쌓는 중입니다.');
 }
@@ -580,9 +586,15 @@ async function startVoiceActivityMonitor() {
     state.audioAnalyser.getFloatTimeDomainData(state.audioSamples);
     const level = calculateRms(state.audioSamples);
     if (level >= VOICE_LEVEL_THRESHOLD) {
+      if (!state.audioVoiceActive && state.lastVoiceAt && Date.now() - state.lastVoiceAt >= 1000 && normalizeWhitespace(els.transcript.value || state.transcript)) {
+        state.pendingLineBreakBeforeNextSpeech = true;
+      }
+      state.audioVoiceActive = true;
       state.lastVoiceAt = Date.now();
       return;
     }
+
+    state.audioVoiceActive = false;
 
     if (hasTimedOutSince(state.lastVoiceAt, Date.now(), SILENCE_TIMEOUT_MS)) {
       stopCapture();
