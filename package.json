@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Pardon은 음성을 녹음하고 STT 원문을 보여주며, 3개의 재작성안을 고를 수 있게 해주는 정적 브라우저 앱입니다.",
+  "description": "Pardon은 음성을 녹음하고 STT 원문을 보여주며, 로컬 머신러닝으로 문맥을 보정한 3개의 가능성을 고를 수 있게 해주는 정적 브라우저 앱입니다.",
   "scripts": {
     "start": "node server.js",
     "test": "node --test"

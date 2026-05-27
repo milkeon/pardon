@@ -1,3 +1,5 @@
+import { predictRewriteFocus } from './ml.js';
+
 const DEFAULT_CONTEXT_HINTS = ['명확함', '친절함', '간결함'];
 
 const TRANSFORMERS = [
@@ -54,8 +56,9 @@ export function inferContextHints(context) {
 export function deriveContextProfile(context, transcript = '') {
   const combined = normalizeWhitespace(`${context} ${transcript}`).toLowerCase();
   const hints = inferContextHints(context);
+  const mlFocus = predictRewriteFocus(combined);
 
-  const channel = /(email|mail|이메일)/i.test(combined)
+  let channel = /(email|mail|이메일)/i.test(combined)
     ? 'email'
     : /(chat|slack|메신저|dm|discord)/i.test(combined)
       ? 'chat'
@@ -65,7 +68,7 @@ export function deriveContextProfile(context, transcript = '') {
           ? 'presentation'
           : 'general';
 
-  const audience = /(customer|고객|client|환자|member)/i.test(combined)
+  let audience = /(customer|고객|client|환자|member)/i.test(combined)
     ? 'customer'
     : /(team|팀|동료|cohort|group)/i.test(combined)
       ? 'team'
@@ -73,7 +76,7 @@ export function deriveContextProfile(context, transcript = '') {
         ? 'manager'
         : 'general';
 
-  const tone = /(urgent|급함|긴급|asap|빨리|지금)/i.test(combined)
+  let tone = /(urgent|급함|긴급|asap|빨리|지금)/i.test(combined)
     ? 'urgent'
     : /(sorry|apology|미안|사과)/i.test(combined)
       ? 'apologetic'
@@ -85,7 +88,7 @@ export function deriveContextProfile(context, transcript = '') {
             ? 'concise'
             : 'neutral';
 
-  const intent = /(ask|question|why|how|what|궁금|문의)/i.test(combined)
+  let intent = /(ask|question|why|how|what|궁금|문의)/i.test(combined)
     ? 'question'
     : /(sorry|apology|미안|사과)/i.test(combined)
       ? 'apology'
@@ -95,9 +98,43 @@ export function deriveContextProfile(context, transcript = '') {
           ? 'action'
           : 'general';
 
-  const urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(combined) ? 'high' : 'normal';
+  let urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(combined) ? 'high' : 'normal';
 
-  return { channel, audience, tone, intent, urgency, hints };
+  if (mlFocus.confidence >= 0.32) {
+    switch (mlFocus.label) {
+      case 'polite':
+        tone = tone === 'urgent' ? tone : 'formal';
+        if (channel === 'general') channel = 'email';
+        break;
+      case 'direct':
+        if (tone === 'neutral') tone = 'casual';
+        if (channel === 'general') channel = 'chat';
+        break;
+      case 'question':
+        intent = 'question';
+        if (tone === 'neutral') tone = 'casual';
+        break;
+      case 'action':
+        intent = 'action';
+        urgency = 'high';
+        if (channel === 'general') channel = 'chat';
+        break;
+      case 'summary':
+        channel = 'report';
+        tone = 'concise';
+        if (intent === 'general') intent = 'update';
+        break;
+      case 'apology':
+        tone = 'apologetic';
+        intent = 'apology';
+        if (channel === 'general') channel = 'email';
+        break;
+      default:
+        break;
+    }
+  }
+
+  return { channel, audience, tone, intent, urgency, hints, mlFocus };
 }
 
 export function buildRemotePrompt({ transcript, context = '' }) {
@@ -152,20 +189,24 @@ function simplifyText(text) {
 function adaptToContext(text, profile) {
   const base = simplifyText(text);
 
-  if (profile.tone === 'formal' || profile.audience === 'customer') {
+  if (profile.mlFocus?.label === 'apology' || profile.tone === 'apologetic') {
     return softenText(base);
   }
 
-  if (profile.channel === 'chat' || profile.urgency === 'high') {
+  if (profile.mlFocus?.label === 'summary' || profile.intent === 'update' || profile.channel === 'report') {
+    return structureAsUpdate(base);
+  }
+
+  if (profile.mlFocus?.label === 'action' || profile.channel === 'chat' || profile.urgency === 'high') {
     return tightenText(base);
   }
 
-  if (profile.intent === 'question') {
+  if (profile.mlFocus?.label === 'question' || profile.intent === 'question') {
     return ensureQuestionTone(base);
   }
 
-  if (profile.intent === 'update' || profile.channel === 'report') {
-    return structureAsUpdate(base);
+  if (profile.mlFocus?.label === 'polite' || profile.tone === 'formal' || profile.audience === 'customer') {
+    return softenText(base);
   }
 
   return base;
@@ -235,6 +276,9 @@ function summaryNote(profile, fallback) {
   if (profile.tone !== 'neutral') parts.push(profile.tone);
   if (profile.intent !== 'general') parts.push(profile.intent);
   if (profile.urgency === 'high') parts.push('긴급');
+  if (profile.mlFocus?.label && profile.mlFocus.confidence >= 0.45) {
+    parts.push(`ML:${profile.mlFocus.label}`);
+  }
 
   const note = parts.length ? parts.join(' · ') : fallback;
   return `맥락: ${note}`;

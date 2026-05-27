@@ -215,23 +215,23 @@ async function handleGenerateClicked() {
   }
 
   if (!apiKey) {
-    setStatus('브라우저 API 키가 없어서 로컬 결정적 가능성 엔진을 사용합니다.');
+    setStatus('브라우저 API 키가 없어서 로컬 ML + 규칙 기반 가능성 엔진을 사용합니다.');
     renderVariants();
     return;
   }
 
   els.generateButton.disabled = true;
-  setStatus('브라우저에 내장된 OpenAI로 가능성 3가지를 생성하는 중입니다...');
+  setStatus('브라우저에 내장된 OpenAI와 로컬 ML 기반 문맥 신호로 가능성 3가지를 생성하는 중입니다...');
 
   try {
     const remoteVariants = await generateRemoteVariants({ transcript, context, apiKey });
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
-    setStatus('OpenAI로 가능성 3가지를 생성했습니다.');
+    setStatus('OpenAI와 로컬 ML 문맥 신호로 가능성 3가지를 생성했습니다.');
   } catch (error) {
     state.variants = buildRewriteVariants(transcript, context);
     renderVariantCards(state.variants);
-    setStatus(`원격 생성에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
+    setStatus(`원격 생성에 실패해서 로컬 ML + 규칙 기반 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
     els.generateButton.disabled = false;
   }
@@ -323,7 +323,8 @@ function updateSupportStatus() {
 
   els.supportStatus.textContent = [
     hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
-    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨'
+    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨',
+    '로컬 ML: Naive Bayes'
   ].join(' · ');
 }
 
