@@ -142,13 +142,28 @@ function onRecognitionResult(event) {
     }
   }
 
-  if (finalText) {
-    state.transcript = normalizeWhitespace(`${state.transcript} ${finalText}`);
-    setTranscript(state.transcript + (interimText ? ` ${interimText}` : ''));
+  // 양 끝 공백을 정돈한 클린 텍스트 획득
+  const cleanedFinal = finalText.trim();
+  const cleanedInterim = interimText.trim();
+
+  if (cleanedFinal) {
+    const current = state.transcript.trim();
+    if (current) {
+      // 기존 원문이 존재하면 줄바꿈(\n)으로 구분하여 신규 인식 문장을 안전하게 덧붙임
+      state.transcript = `${current}\n${cleanedFinal}`;
+    } else {
+      state.transcript = cleanedFinal;
+    }
+    
+    // 임시 텍스트(실시간 입력 중인 문장)가 남아 있으면 다음 줄에 임시 덧붙여 보여줌
+    const displayedText = state.transcript + (cleanedInterim ? `\n${cleanedInterim}` : '');
+    setTranscript(displayedText);
     renderVariants();
-  } else if (interimText) {
-    state.interimTranscript = normalizeWhitespace(interimText);
-    setTranscript(normalizeWhitespace(`${state.transcript} ${state.interimTranscript}`));
+  } else if (cleanedInterim) {
+    const current = state.transcript.trim();
+    // 현재 실시간 타이핑 중인 문장을 기존 텍스트 밑에 새로운 줄로 연결하여 표시
+    const displayedText = current ? `${current}\n${cleanedInterim}` : cleanedInterim;
+    setTranscript(displayedText);
   }
 
   setStatus('음성을 듣고 STT로 변환하는 중입니다.');
