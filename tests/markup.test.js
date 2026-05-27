@@ -9,11 +9,14 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('<h1>Pardon</h1>'));
   assert.ok(html.includes('녹음 시작'));
   assert.ok(html.includes('변환'));
+  assert.ok(html.includes('확정'));
   assert.ok(html.includes('원문 STT'));
   assert.ok(html.includes('제안 3가지'));
   assert.ok(html.includes('차이 읽는 법'));
   assert.ok(html.includes('노란색'));
   assert.ok(html.includes('선택한 문장 복사'));
+  assert.ok(html.includes('확정 요약'));
+  assert.ok(html.includes('data-action="confirm"'));
   assert.ok(html.includes('id="toast"'));
   assert.ok(html.includes('spellcheck="false"'));
   assert.ok(html.includes('autocorrect="off"'));
@@ -23,5 +26,5 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=f2c31e5'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-1'));
 });

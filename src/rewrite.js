@@ -170,6 +170,43 @@ export function buildRewriteVariants(text) {
   ];
 }
 
+export function buildConfirmationSummary(text, sourceText = '') {
+  const baseText = normalizeWhitespace(text);
+  if (!baseText) {
+    return '확정한 내용을 요약할 수 없습니다.';
+  }
+
+  const profile = deriveContextProfile(sourceText || text);
+  const structure = analyzeTranscriptStructure(text, profile);
+  const cleanedClauses = (structure.clauses.length ? structure.clauses : splitTranscriptClauses(baseText))
+    .map((clause) => tightenSentence(applyTranscriptCorrections(cleanSpokenKorean(clause))))
+    .filter(Boolean);
+
+  if (cleanedClauses.length === 0) {
+    return ensureSentenceEnding(baseText);
+  }
+
+  if (cleanedClauses.length === 1) {
+    const single = ensureSentenceEnding(cleanedClauses[0]);
+    return single.length <= baseText.length ? single : ensureSentenceEnding(baseText);
+  }
+
+  const head = cleanedClauses[0];
+  const headTwo = normalizeWhitespace(cleanedClauses.slice(0, 2).join(' '));
+  const candidate = head.length >= 24 ? head : headTwo;
+
+  if (candidate && candidate.length < baseText.length) {
+    return ensureSentenceEnding(candidate);
+  }
+
+  const polished = buildSummaryVariant(text, profile, structure);
+  if (polished && polished.length < baseText.length) {
+    return polished;
+  }
+
+  return ensureSentenceEnding(head || baseText);
+}
+
 function buildPhoneticVariant(text) {
   const clauses = splitTranscriptClauses(text);
   const sourceClauses = clauses.length ? clauses : [normalizeWhitespace(text)];

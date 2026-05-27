@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRewriteVariants, deriveContextProfile, inferContextHints, normalizeWhitespace } from '../src/rewrite.js';
+import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, inferContextHints, normalizeWhitespace } from '../src/rewrite.js';
 import { predictRewriteFocus } from '../src/ml.js';
 
 test('normalizeWhitespace는 과도한 공백을 정리한다', () => {
@@ -64,5 +64,14 @@ test('buildRewriteVariants는 긴 문맥 입력을 실제로 재구성한다', (
   assert.notEqual(variants[2].text, raw);
   assert.ok(variants[1].text.includes('해야 합니다'));
   assert.ok(!/^(핵심은|그리고|정리하면|정리해 보면)\b/.test(variants[2].text));
+});
+
+test('buildConfirmationSummary는 확정 내용을 아래 요약으로 줄여준다', () => {
+  const summary = buildConfirmationSummary('팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다. 오늘 안에 확인도 필요합니다.');
+
+  assert.ok(summary.length > 0);
+  assert.ok(summary.length < 80);
+  assert.ok(summary.includes('팀에 업데이트') || summary.includes('진행 상황'));
+  assert.ok(!summary.includes('오늘 안에 확인도 필요합니다'));
 });
 

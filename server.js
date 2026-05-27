@@ -118,27 +118,27 @@ async function callOpenAIWhisper(audioBuffer) {
   return data.text || '';
 }
 
-// OpenAI Chat Completion API를 호출하여 지능형 문맥 및 영한 혼용 3가지 가능성을 빌드하는 헬퍼
-async function callOpenAIGPT(transcript, hint) {
+// OpenAI Chat Completion API를 호출하여 지능형 문맥 및 영한 혼용 3가지 제안을 빌드하는 헬퍼
+async function callOpenAIRewriteVariants(transcript, hint) {
   const apiKey = process.env.OPENAI_API_KEY || '';
   if (!apiKey) throw new Error('서버에 OpenAI API Key 설정이 필요합니다. (.env 확인)');
 
   const systemContent = `화자는 한국어와 영어를 수시로 혼용하는 IT 엔지니어/개발자입니다.
-브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음(예: "조커" -> "Docker", "이엠브이/EM v" -> "env", "벤드/vend/브이엔디" -> "venv", "에이아이/a i" -> "AI", "구포" -> "Kube/쿠버네티스", "디비" -> "DB", "입원" -> "이번")이나 띄어쓰기 오류로 엉망진창 깨져서 오인식되었을 확률이 100%입니다.
+브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음이나 띄어쓰기 오류로 깨져서 오인식되었을 수 있습니다.
 
 [분석 핵심 임무]
-입력된 원문에서 이러한 억지 발음 오류나 오타를 귀신같이 간파하여, 화자가 원래 의도했던 "올바른 전문 IT 기술 영단어가 세련되게 혼용된 고급 자연어 문장"으로 재구성해야 합니다.
+입력된 원문에서 오인식된 단어와 군더더기를 정리하되, 원문 의미를 바꾸지 말고 자연스러운 문장으로 복원하십시오.
 
 ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
-위 힌트 주제와 적극 부합하는 기술 전문 지식(예: SQLD, Docker, venv 가상환경, API, Git 등)을 총동원하여 문맥을 날카롭게 특정하고 복원하십시오.` : ''}
+위 힌트 주제와 부합하는 기술 용어와 문맥을 살려 복원하십시오.` : ''}
 
-반환 양식은 아래의 3가지 대안을 지닌 엄격한 JSON 형태입니다. (키: p1, p2, p3)
+반환 양식은 아래의 3가지 대안을 지닌 엄격한 JSON 형태입니다. (키: v1, v2, v3)
 
-- p1 (가능성 1: 가장 유력): 원래의 문장 형태나 맥락 흐름을 훼손하지 않는 범위 내에서, 오직 꼬인 발음 에러(조커->Docker, a i->AI, vend->venv 등)와 오타만 올바른 원어 믹스 형태로 정확하게 복구한 정통 교정 문장
-- p2 (가능성 2: 유사 발음 교정): 꼬여서 깨진 발음들을 음성학적 유사성(귀로 들리는 발음 소리) 관점에서 힌트 단어들과 결합하여, 실무적인 한영 믹스체로 교정해 낸 문장
-- p3 (가능성 3: 구어 정돈 보정): 중언부언하거나 횡설수설 꼬인 비격식 구어체(예: "~되게 민감하게 얘기가 여기 있는걸...", "~거기 그걸...")의 쓸모없는 군더더기(말더듬, 무의미한 중복 표현)를 싹 제거하고, 힌트 주제에 걸맞은 매끄럽고 극도로 전문적인 비즈니스 실무 문체로 유연하게 요약 정돈한 완성형 문장
+- v1: 원래 문장 구조를 최대한 유지하면서 발음 오류와 오타만 최소 수정한 원문 보정
+- v2: 문맥을 살려 더 자연스럽고 읽기 편하게 다시 쓴 문장
+- v3: 핵심 의미까지 정리한 가장 깔끔한 최종본
 
-설명은 절대로 덧붙이지 말고 오직 JSON(p1, p2, p3)만 리턴하십시오.`;
+설명은 절대로 덧붙이지 말고 오직 JSON(v1, v2, v3)만 리턴하십시오.`;
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -148,7 +148,50 @@ ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      temperature: 0.3,
+      temperature: 0.35,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemContent },
+        { role: 'user', content: JSON.stringify({ transcript }) }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GPT API Error: ${text}`);
+  }
+
+  const payload = await response.json();
+  const content = payload?.choices?.[0]?.message?.content;
+  const parsed = JSON.parse(content);
+  const cleanFallback = String(transcript ?? '').trim();
+
+  return [
+    { id: 'possibility-1', label: '제안 1 · 원문 보정', text: parsed?.v1 || cleanFallback },
+    { id: 'possibility-2', label: '제안 2 · 자연스러운 문장', text: parsed?.v2 || cleanFallback },
+    { id: 'possibility-3', label: '제안 3 · 정리된 문장', text: parsed?.v3 || cleanFallback }
+  ];
+}
+
+async function callOpenAISummary(transcript, selectedText, hint) {
+  const apiKey = process.env.OPENAI_API_KEY || '';
+  if (!apiKey) throw new Error('서버에 OpenAI API Key 설정이 필요합니다. (.env 확인)');
+
+  const systemContent = `입력된 문장을 아래쪽에 표시할 1~2문장 요약으로 압축하십시오.
+원문을 그대로 반복하지 말고, 확정된 문장의 핵심을 짧고 자연스럽게 정리하십시오.
+반환 양식은 엄격한 JSON 형태입니다. (키: title, summary)
+설명은 절대로 덧붙이지 말고 오직 JSON만 리턴하십시오.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -157,7 +200,7 @@ ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
         },
         {
           role: 'user',
-          content: JSON.stringify({ transcript })
+          content: JSON.stringify({ transcript, selectedText, hint })
         }
       ]
     })
@@ -172,14 +215,10 @@ ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
   const content = payload?.choices?.[0]?.message?.content;
   const parsed = JSON.parse(content);
 
-  // 로컬 폴백 텍스트 (API 오류 등으로 대처가 필요할 시 사용)
-  const cleanFallback = String(transcript ?? '').trim();
-
-  return [
-    { id: 'p1', label: '가능성 1 (가장 유력)', text: parsed?.p1 || cleanFallback },
-    { id: 'p2', label: '가능성 2 (유사 발음 교정)', text: parsed?.p2 || cleanFallback },
-    { id: 'p3', label: '가능성 3 (구어 정돈 보정)', text: parsed?.p3 || cleanFallback }
-  ];
+  return {
+    title: parsed?.title || '확정 요약',
+    summary: parsed?.summary || String(selectedText ?? '').trim()
+  };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -211,13 +250,32 @@ const server = http.createServer(async (req, res) => {
         try {
           const body = Buffer.concat(chunks).toString('utf8');
           const { transcript, hint } = JSON.parse(body);
-          const variants = await callOpenAIGPT(transcript, hint);
+          const variants = await callOpenAIRewriteVariants(transcript, hint);
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify(variants));
         } catch (err) {
           console.error('GPT API 프록시 오류:', err);
           res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end(err.message || 'GPT Proxy Error');
+        }
+      });
+      return;
+    }
+
+    if (req.url === '/api/summary' && req.method === 'POST') {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', async () => {
+        try {
+          const body = Buffer.concat(chunks).toString('utf8');
+          const { transcript, selectedText, hint } = JSON.parse(body);
+          const summary = await callOpenAISummary(transcript, selectedText, hint);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(summary));
+        } catch (err) {
+          console.error('GPT 요약 API 프록시 오류:', err);
+          res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end(err.message || 'GPT Summary Proxy Error');
         }
       });
       return;

@@ -1,6 +1,7 @@
-import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=f2c31e5';
-import { mergeRecognitionResults } from './stt.js?v=f2c31e5';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=f2c31e5';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-1';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-1';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-1';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-1';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -8,12 +9,15 @@ const els = {
   clearButton: document.querySelector('[data-action="clear"]'),
   generateButton: document.querySelector('[data-action="generate"]'),
   copyButton: document.querySelector('[data-action="copy"]'),
+  confirmButton: document.querySelector('[data-action="confirm"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   variantList: document.querySelector('#variant-list'),
   emptyState: document.querySelector('#variants-empty'),
+  confirmationStatus: document.querySelector('#confirmation-status'),
+  confirmedSummary: document.querySelector('#confirmed-summary'),
   toast: document.querySelector('#toast')
 };
 
@@ -32,12 +36,15 @@ const state = {
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
+  confirmedSummary: '',
   readyForVariants: false,
   lastVoiceAt: 0,
   isStopping: false,
   voiceMonitorTimer: null,
   recognitionRestartTimer: null,
-  toastTimer: null
+  toastTimer: null,
+  isGenerating: false,
+  isSummarizing: false
 };
 
 const SILENCE_TIMEOUT_MS = 60_000;
@@ -50,6 +57,8 @@ initialize();
 function initialize() {
   updateSupportStatus();
   renderVariants();
+  renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
+  setActionControlsDisabled(false);
   wireEvents();
 }
 
@@ -59,6 +68,7 @@ function wireEvents() {
   els.clearButton.addEventListener('click', clearAll);
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
+  els.confirmButton?.addEventListener('click', handleConfirmClicked);
   els.transcript.addEventListener('input', onTranscriptEdit);
 }
 
@@ -144,9 +154,11 @@ function clearSessionState() {
   state.recognitionSegments = [];
   state.recognitionCommittedTranscript = '';
   state.variants = [];
+  state.confirmedSummary = '';
   state.readyForVariants = false;
   state.selectedVariantId = 'possibility-1';
   state.lastVoiceAt = 0;
+  renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
 }
 
 function onChunk(event) {
@@ -203,7 +215,9 @@ function onTranscriptEdit() {
   state.recognitionCommittedTranscript = els.transcript.value;
   if (state.readyForVariants) {
     state.variants = [];
+    state.confirmedSummary = '';
     renderVariantPlaceholder('원문이 바뀌었습니다. 변환 버튼을 다시 눌러 주세요.');
+    renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
   }
 }
 
@@ -338,7 +352,7 @@ function markChangedTokens(sourceTokens, variantTokens) {
   return marked;
 }
 
-function handleGenerateClicked() {
+async function handleGenerateClicked() {
   state.readyForVariants = true;
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
 
@@ -349,9 +363,19 @@ function handleGenerateClicked() {
     return;
   }
 
-  state.variants = buildRewriteVariants(transcript);
-  renderVariants();
-  setStatus('현재 원문 기준으로 3가지 제안을 변환했습니다.');
+  state.isGenerating = true;
+  setActionControlsDisabled(true);
+  setStatus('제안을 계산하는 중입니다. 서버 LLM이 있으면 먼저 사용하고, 없으면 로컬 보정으로 채웁니다.');
+
+  try {
+    const remoteVariants = await fetchRewriteVariants(transcript);
+    state.variants = remoteVariants || buildRewriteVariants(transcript);
+    renderVariants();
+    setStatus(remoteVariants ? 'LLM으로 3가지 제안을 만들었습니다.' : '현재 원문 기준으로 3가지 제안을 만들었습니다.');
+  } finally {
+    state.isGenerating = false;
+    setActionControlsDisabled(false);
+  }
 }
 
 async function copySelectedVariant() {
@@ -370,6 +394,35 @@ async function copySelectedVariant() {
     setStatus('선택한 제안을 클립보드에 복사했습니다.');
   } else {
     setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
+  }
+}
+
+async function handleConfirmClicked() {
+  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  if (!transcript) {
+    setStatus('먼저 원문이 있어야 확정할 수 있습니다.');
+    return;
+  }
+
+  const variants = state.variants.length ? state.variants : buildRewriteVariants(transcript);
+  const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
+  if (!selected) {
+    setStatus('먼저 제안을 만든 뒤 확정해 주세요.');
+    return;
+  }
+
+  state.isSummarizing = true;
+  setActionControlsDisabled(true);
+  setStatus('확정한 내용을 아래에 요약하는 중입니다.');
+
+  try {
+    const remoteSummary = await fetchConfirmationSummary(selected.text, transcript);
+    const summaryText = remoteSummary?.summary || buildConfirmationSummary(selected.text, transcript);
+    renderConfirmedSummary(summaryText, selected.label);
+    setStatus('확정한 제안을 아래에 요약해서 보여줍니다.');
+  } finally {
+    state.isSummarizing = false;
+    setActionControlsDisabled(false);
   }
 }
 
@@ -437,6 +490,32 @@ function renderVariantPlaceholder(message) {
   els.variantList.innerHTML = '';
   els.emptyState.hidden = false;
   els.emptyState.textContent = message;
+  setActionControlsDisabled(false);
+}
+
+function renderConfirmedSummary(summaryText, sourceLabel) {
+  const hasSummary = Boolean(normalizeWhitespace(summaryText));
+  const content = hasSummary ? summaryText : '확정하면 아래에 요약이 표시됩니다.';
+  state.confirmedSummary = content;
+
+  if (!els.confirmedSummary) return;
+
+  els.confirmationStatus.textContent = sourceLabel ? `확정한 제안: ${sourceLabel}` : '확정 요약';
+  els.confirmedSummary.hidden = false;
+  els.confirmedSummary.classList.toggle('empty-state', !hasSummary);
+  els.confirmedSummary.innerHTML = hasSummary
+    ? `<p class="confirmed-summary__label">확정 요약</p><p class="confirmed-summary__text">${escapeHtml(content)}</p>`
+    : escapeHtml(content);
+}
+
+function setActionControlsDisabled(isBusy) {
+  const hasTranscript = Boolean(normalizeWhitespace(els.transcript.value || state.transcript));
+  const hasVariants = state.variants.length > 0;
+  els.generateButton.disabled = isBusy;
+  els.copyButton.disabled = isBusy || !hasTranscript || !hasVariants;
+  if (els.confirmButton) {
+    els.confirmButton.disabled = isBusy || !hasTranscript || !hasVariants;
+  }
 }
 
 async function startVoiceActivityMonitor() {
