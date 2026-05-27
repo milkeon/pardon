@@ -26,7 +26,8 @@ const state = {
   selectedVariantId: 'p1',
   selectedAudioUrl: '',
   variants: [],
-  isCapturing: false // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
+  isCapturing: false, // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
+  currentSessionFinal: '' // 현재 음성 인식 세션의 누적 확정 텍스트 버퍼
 };
 
 initialize();
@@ -55,8 +56,9 @@ async function startCapture() {
     state.recorder.addEventListener('stop', onRecorderStop);
     state.recorder.start();
 
-    // 캡처 상태 활성화
+    // 캡처 상태 및 세션 버퍼 초기화
     state.isCapturing = true;
+    state.currentSessionFinal = '';
 
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
@@ -71,6 +73,7 @@ async function startCapture() {
     setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
   } catch (error) {
     state.isCapturing = false;
+    state.currentSessionFinal = '';
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
 }
@@ -110,6 +113,7 @@ function clearAll() {
   state.interimTranscript = '';
   state.chunks = [];
   state.variants = [];
+  state.currentSessionFinal = '';
   setTranscript('');
   setAudioUrl('');
   renderVariants();
@@ -128,40 +132,40 @@ function onRecorderStop() {
 }
 
 function onRecognitionResult(event) {
-  let finalText = '';
-  let interimText = '';
+  let sessionFinalText = '';
+  let sessionInterimText = '';
 
-  for (let i = event.resultIndex; i < event.results.length; i += 1) {
+  // 변동 인덱스 방식이 아닌, 현재 세션 전체의 results[0]부터 실시간 완전 동기화 진행
+  for (let i = 0; i < event.results.length; i += 1) {
     const segment = event.results[i][0].transcript;
     if (event.results[i].isFinal) {
-      finalText += segment;
+      sessionFinalText += segment;
     } else {
-      interimText += segment;
+      sessionInterimText += segment;
     }
   }
 
-  // 양 끝 공백을 정돈한 클린 텍스트 획득
-  const cleanedFinal = finalText.trim();
-  const cleanedInterim = interimText.trim();
+  // 실시간 보정을 위해 이번 세션의 확정 문장 업데이트
+  state.currentSessionFinal = sessionFinalText.trim();
+  const cleanedInterim = sessionInterimText.trim();
 
-  if (cleanedFinal) {
-    const current = state.transcript.trim();
-    if (current) {
-      // 기존 원문이 존재하면 줄바꿈(\n)으로 구분하여 신규 인식 문장을 안전하게 덧붙임
-      state.transcript = `${current}\n${cleanedFinal}`;
-    } else {
-      state.transcript = cleanedFinal;
-    }
-    
-    // 임시 텍스트(실시간 입력 중인 문장)가 남아 있으면 다음 줄에 임시 덧붙여 보여줌
-    const displayedText = state.transcript + (cleanedInterim ? `\n${cleanedInterim}` : '');
-    setTranscript(displayedText);
+  // 이전 세션들의 전체 누적 텍스트와 현재 진행 중인 세션 결과를 정갈하게 동기화
+  const base = state.transcript.trim();
+  
+  let displayedText = base;
+  if (state.currentSessionFinal) {
+    displayedText = base ? `${base}\n${state.currentSessionFinal}` : state.currentSessionFinal;
+  }
+  
+  if (cleanedInterim) {
+    displayedText = displayedText ? `${displayedText}\n${cleanedInterim}` : cleanedInterim;
+  }
+
+  setTranscript(displayedText);
+  
+  // 새로운 문맥이 최종 확정될 때마다 우측 카드 리스트 갱신
+  if (state.currentSessionFinal) {
     renderVariants();
-  } else if (cleanedInterim) {
-    const current = state.transcript.trim();
-    // 현재 실시간 타이핑 중인 문장을 기존 텍스트 밑에 새로운 줄로 연결하여 표시
-    const displayedText = current ? `${current}\n${cleanedInterim}` : cleanedInterim;
-    setTranscript(displayedText);
   }
 
   setStatus('음성을 듣고 STT로 변환하는 중입니다.');
@@ -176,21 +180,32 @@ function onRecognitionError(event) {
 }
 
 function onRecognitionEnd() {
-  // 사용자가 명시적으로 정지 버튼을 누르지 않았는데 브라우저 타임아웃 등으로 꺼진 경우 새 인스턴스로 자동 재시작
+  // 세션이 완전히 마무리되었으므로, 이번 세션의 확정본을 안전하게 state.transcript에 통합
+  if (state.currentSessionFinal) {
+    const current = state.transcript.trim();
+    state.transcript = current ? `${current}\n${state.currentSessionFinal}` : state.currentSessionFinal;
+    state.currentSessionFinal = ''; // 리셋
+  }
+
+  // 사용자가 명시적으로 정지 버튼을 누르지 않았는데 브라우저 타임아웃 등으로 꺼진 경우
   if (state.isCapturing) {
-    try {
-      const recognition = createSpeechRecognition();
-      state.recognition = recognition;
-      if (recognition) {
-        recognition.onresult = onRecognitionResult;
-        recognition.onerror = onRecognitionError;
-        recognition.onend = onRecognitionEnd;
-        recognition.start();
+    // 마이크 하드웨어 리소스 해제 시간을 보장하기 위해 150ms 안전 딜레이 타이머를 둡니다. (인식 멈춤 현상 완전 정복)
+    setTimeout(() => {
+      if (!state.isCapturing) return; // 대기 도중 정지 버튼이 눌렸다면 탈출
+      try {
+        const recognition = createSpeechRecognition();
+        state.recognition = recognition;
+        if (recognition) {
+          recognition.onresult = onRecognitionResult;
+          recognition.onerror = onRecognitionError;
+          recognition.onend = onRecognitionEnd;
+          recognition.start();
+        }
+      } catch (e) {
+        console.error('STT 재시작 실패:', e);
       }
-      return;
-    } catch (e) {
-      console.error('STT 재시작 실패:', e);
-    }
+    }, 150);
+    return;
   }
 
   state.recognition = null;
