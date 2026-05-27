@@ -22,6 +22,7 @@ const state = {
   chunks: [],
   transcript: '',
   recognitionSegments: [],
+  recognitionCommittedTranscript: '',
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
@@ -112,6 +113,7 @@ function clearSessionState() {
   state.chunks = [];
   state.transcript = '';
   state.recognitionSegments = [];
+  state.recognitionCommittedTranscript = '';
   state.variants = [];
   state.readyForVariants = false;
   state.selectedVariantId = 'possibility-1';
@@ -131,11 +133,20 @@ function onRecorderStop() {
 
 function onRecognitionResult(event) {
   const recognitionResults = Array.from(event.results, (result) => ({
-    transcript: result[0].transcript
+    transcript: result[0].transcript,
+    isFinal: result.isFinal
   }));
-  const merged = mergeRecognitionResults(state.recognitionSegments, recognitionResults);
+  const merged = mergeRecognitionResults(
+    {
+      segments: state.recognitionSegments,
+      committedTranscript: state.recognitionCommittedTranscript
+    },
+    recognitionResults,
+    event.resultIndex ?? 0
+  );
 
   state.recognitionSegments = merged.segments;
+  state.recognitionCommittedTranscript = merged.committedTranscript;
   state.transcript = merged.transcript;
   setTranscript(merged.transcript);
 
@@ -166,7 +177,8 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
-  state.recognitionSegments = [els.transcript.value];
+  state.recognitionSegments = [{ transcript: els.transcript.value, isFinal: true }];
+  state.recognitionCommittedTranscript = els.transcript.value;
   if (state.readyForVariants) {
     renderVariants();
   }
