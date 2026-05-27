@@ -1,4 +1,3 @@
-// 억지 한글화되어 들어온 STT 발음들을 개발자 실무 영어 단어로 변환해주는 스마트 치환 매핑 사전
 const EN_KO_MAP = [
   [/에이피아이/gi, 'API'],
   [/깃\s*커밋/gi, 'Git commit'],
@@ -21,11 +20,28 @@ const EN_KO_MAP = [
   [/오디오/gi, 'Audio'],
   [/마이크/gi, 'Mic'],
   [/도커/gi, 'Docker'],
+  [/조커/gi, 'Docker'], // 사용자가 '조커'라고 발음한 오역 복원 규칙 추가!
   [/컨테이너/gi, 'Container'],
   [/브랜치/gi, 'Branch'],
   [/머지/gi, 'Merge'],
   [/풀\s*리퀘/gi, 'PR (Pull Request)'],
-  [/풀리퀘/gi, 'PR (Pull Request)']
+  [/풀리퀘/gi, 'PR (Pull Request)'],
+  [/a i/gi, 'AI'], // 띄어쓰기 깨진 AI 교정
+  [/에이아이/gi, 'AI'],
+  [/이이엠브이/gi, 'env 가상환경'],
+  [/이엠브이/gi, 'env 가상환경'],
+  [/이엠 브이/gi, 'env 가상환경'],
+  [/이 엠 브이/gi, 'env 가상환경'],
+  [/이 엠브이/gi, 'env 가상환경'],
+  [/가상\s*환경/gi, '가상환경(venv)'],
+  [/브이엔디/gi, 'venv'],
+  [/벤드/gi, 'venv'],
+  [/vend/gi, 'venv'],
+  [/구포/gi, 'Kube(쿠버네티스)'],
+  [/데이터스/gi, '데이터셋(Dataset)'],
+  [/파이썬/gi, 'Python'],
+  [/딥러닝/gi, 'Deep Learning'],
+  [/모델\s*학습/gi, 'Model Training']
 ];
 
 const TRANSFORMERS = [
@@ -89,9 +105,9 @@ export function buildRewriteVariants(text) {
 }
 
 function simplifyText(text) {
-  // 음성 인식 중 흔한 불필요한 아, 음, 어 등 말더듬성 추임새 일괄 제거
+  // 음성 인식 도중 극심하게 꼬인 군더더기 어휘, 추임새, 말더듬용 단어들을 지능적으로 싹 제거합니다.
   const withoutFillers = String(text ?? '')
-    .replace(/\b(아|음|어|그|저|습|읍|엄|actually|basically)\b/g, '')
+    .replace(/\b(아|음|어|그|저|습|읍|엄|actually|basically|거기|그거|그게|되게|이제|아무래도|어떤|그런|그렇게|되게\s*민감하게|가지고|가지고\s*아|가지고\s*어)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 

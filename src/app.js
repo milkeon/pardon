@@ -13,7 +13,8 @@ const els = {
   recordingBadge: document.querySelector('#recording-badge'),
   variantList: document.querySelector('#variant-list'),
   emptyState: document.querySelector('#variants-empty'),
-  contextHint: document.querySelector('#context-hint')
+  contextHint: document.querySelector('#context-hint'),
+  apiWarningBanner: document.querySelector('#api-warning-banner')
 };
 
 const state = {
@@ -207,11 +208,13 @@ function onRecorderStop() {
     .then((remoteVariants) => {
       state.variants = remoteVariants;
       renderVariantCards(remoteVariants);
+      if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
       setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
     })
     .catch((err) => {
       console.error('서버 머신러닝 분석 실패:', err);
       setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
+      if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
       renderVariants(); // 실패 시 로컬 엔진 폴백
     });
 }
@@ -342,11 +345,13 @@ function onRecognitionEnd() {
         .then((remoteVariants) => {
           state.variants = remoteVariants;
           renderVariantCards(remoteVariants);
+          if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
           setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
         })
         .catch((err) => {
           console.error('서버 머신러닝 분석 실패:', err);
           setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
+          if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
           renderVariants();
         });
     } else {
@@ -417,10 +422,12 @@ async function handleGenerateClicked() {
     const remoteVariants = await generateServerVariants(transcript);
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
+    if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
     setStatus('OpenAI로 머신러닝 분석을 완료했습니다.');
   } catch (error) {
     state.variants = buildRewriteVariants(transcript);
     renderVariantCards(state.variants);
+    if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
     setStatus(`원격 분석에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
     els.generateButton.disabled = false;
