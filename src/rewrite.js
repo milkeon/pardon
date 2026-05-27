@@ -17,7 +17,7 @@ const EN_KO_MAP = [
   [/테스트/gi, 'Test'],
   [/프로세스/gi, 'Process'],
   [/에러/gi, 'Error'],
-  [/로그/gi, 'Log'],
+  [/(?<![가-힣])로그(?![가-힣])/gi, 'Log'],
   [/오디오/gi, 'Audio'],
   [/마이크/gi, 'Mic'],
   [/도커/gi, 'Docker'],
