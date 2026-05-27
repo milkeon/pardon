@@ -8,7 +8,6 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
-  context: document.querySelector('#context'),
   apiKey: document.querySelector('#api-key'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
@@ -45,7 +44,6 @@ function wireEvents() {
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
   els.transcript.addEventListener('input', onTranscriptEdit);
-  els.context.addEventListener('input', () => renderVariants());
 }
 
 async function startCapture() {
@@ -215,8 +213,7 @@ function onTranscriptEdit() {
 
 function renderVariants() {
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
-  const context = els.context.value;
-  const variants = buildRewriteVariants(transcript, context);
+  const variants = buildRewriteVariants(transcript);
   state.variants = variants;
   renderVariantCards(variants);
 }
@@ -248,7 +245,6 @@ function renderVariantCards(variants) {
 
 async function handleGenerateClicked() {
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
-  const context = els.context.value;
   const apiKey = normalizeWhitespace(els.apiKey.value);
 
   if (!transcript) {
@@ -267,12 +263,12 @@ async function handleGenerateClicked() {
   setStatus('브라우저에 내장된 OpenAI로 재작성 안을 생성하는 중입니다...');
 
   try {
-    const remoteVariants = await generateRemoteVariants({ transcript, context, apiKey });
+    const remoteVariants = await generateRemoteVariants({ transcript, apiKey });
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
     setStatus('OpenAI로 재작성 안을 생성했습니다.');
   } catch (error) {
-    state.variants = buildRewriteVariants(transcript, context);
+    state.variants = buildRewriteVariants(transcript);
     renderVariantCards(state.variants);
     setStatus(`원격 생성에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
@@ -283,7 +279,7 @@ async function handleGenerateClicked() {
 async function copySelectedVariant() {
   const variants = state.variants.length
     ? state.variants
-    : buildRewriteVariants(normalizeWhitespace(els.transcript.value || state.transcript), els.context.value);
+    : buildRewriteVariants(normalizeWhitespace(els.transcript.value || state.transcript));
   const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
 
   try {
@@ -304,11 +300,12 @@ function createSpeechRecognition() {
   const recognition = new Recognition();
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 3; // 인식 민감도 및 발음 대안 후보 정밀도 최대치 부여
   recognition.lang = 'ko-KR';
   return recognition;
 }
 
-async function generateRemoteVariants({ transcript, context, apiKey }) {
+async function generateRemoteVariants({ transcript, apiKey }) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -322,11 +319,11 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
       messages: [
         {
           role: 'system',
-          content: '입력된 원문 STT는 브라우저 머신러닝의 한계로 인해 오인식이나 맞춤법 오타가 있을 가능성이 높습니다. 사용자가 제공한 문맥 힌트를 기반으로, 화자가 원래 말하려고 했던 가장 유력한 3가지 문장 가능성(해석 대안)을 추정해 주세요. 키는 p1, p2, p3만 사용하며, 엄격한 JSON 형태로 반환해 주세요. 추가 설명은 넣지 마세요.'
+          content: '화자는 한국어와 영어를 수시로 혼용하여 사용하는 IT 엔지니어/개발자입니다. 브라우저 머신러닝의 한계로 인해, 영어를 강제로 억지 한글 발음으로 받아썼거나(예: "에이피아이", "커밋해줘", "도커") 발음이 심하게 꼬여 오인식되었을 확률이 매우 높습니다. 해당 발음이 본래 무엇을 의미하려 한 것인지 유유히 유추하여, 영어(API, Git, commit, Docker, DB, PR, server 등)와 한글이 올바르게 혼용된 고도로 자연스러운 실무 개발자 문장 3가지 가능성을 엄격한 JSON 형태로 추정 반환하십시오. 키는 p1, p2, p3만 사용하고, 설명은 절대로 덧붙이지 마세요.'
         },
         {
           role: 'user',
-          content: JSON.stringify({ transcript, context })
+          content: JSON.stringify({ transcript })
         }
       ]
     })
@@ -339,12 +336,12 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
   const payload = await response.json();
   const content = payload?.choices?.[0]?.message?.content;
   const parsed = parseJsonMaybe(content);
-  const localFallback = buildRewriteVariants(transcript, context);
+  const localFallback = buildRewriteVariants(transcript);
 
   return [
     { id: 'p1', label: '가능성 1 (가장 유력)', text: finalizeVariantText(parsed?.p1 || '') || localFallback[0].text },
     { id: 'p2', label: '가능성 2 (유사 발음 교정)', text: finalizeVariantText(parsed?.p2 || '') || localFallback[1].text },
-    { id: 'p3', label: '가능성 3 (문맥 의도 보정)', text: finalizeVariantText(parsed?.p3 || '') || localFallback[2].text }
+    { id: 'p3', label: '가능성 3 (구어 정돈 보정)', text: finalizeVariantText(parsed?.p3 || '') || localFallback[2].text }
   ];
 }
 
