@@ -37,7 +37,28 @@ npm test
 npm start
 ```
 
-그다음 터미널에 표시되는 로컬 주소를 여시면 됩니다. 보통 `http://localhost:4173`입니다.
+그다음 터미널에 표시되는 로컬 주소를 여시면 됩니다. 보통 `http://localhost:3000`입니다.
+
+## 키 없이 LLM 쓰는 방법
+
+Pardon은 기본적으로 **키 없이도** 동작합니다.
+
+- 브라우저 `SpeechRecognition`은 원래 키가 필요 없습니다.
+- 정지 후 3개 제안/확정 요약은 아래 둘 중 하나로 동작합니다.
+  - 로컬 결정적 폴백
+  - 로컬 OpenAI 호환 서버(Ollama, LM Studio, llama.cpp 등)
+
+로컬 LLM 서버를 붙이려면 `.env`에 아래처럼 적습니다.
+
+```bash
+LOCAL_LLM_BASE_URL=http://localhost:11434/v1
+LOCAL_LLM_MODEL=llama3.2:3b
+```
+
+- Ollama를 쓰면 보통 `http://localhost:11434/v1`를 씁니다.
+- LM Studio를 쓰면 보통 `http://localhost:1234/v1`를 씁니다.
+- `OPENAI_API_KEY`가 없더라도, 로컬 서버가 있으면 자동으로 그쪽을 우선 사용합니다.
+- 로컬 서버도 없으면 기존처럼 결정적 로컬 폴백으로 계속 동작합니다.
 
 ## 사용 방법
 

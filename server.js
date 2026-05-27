@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './src/rewrite.js';
 
 // 외부 의존성 없이 로컬 .env 파일의 환경변수를 process.env에 주입하는 초경량 수동 로더
 try {
@@ -118,10 +119,130 @@ async function callOpenAIWhisper(audioBuffer) {
   return data.text || '';
 }
 
-// OpenAI Chat Completion API를 호출하여 지능형 문맥 및 영한 혼용 3가지 제안을 빌드하는 헬퍼
+function hasOpenAIKey() {
+  return Boolean(String(process.env.OPENAI_API_KEY || '').trim());
+}
+
+function cleanBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function hasLocalLlmConfig() {
+  return Boolean(cleanBaseUrl(process.env.LOCAL_LLM_BASE_URL || process.env.OPENAI_BASE_URL));
+}
+
+async function requestJson(url, options = {}, timeoutMs = 4000) {
+  const controller = new AbortController();
+  const scheduleTimeout = globalThis.setTimeout.bind(globalThis);
+  const cancelTimeout = globalThis.clearTimeout.bind(globalThis);
+  const timeout = scheduleTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    cancelTimeout(timeout);
+  }
+}
+
+async function discoverLocalChatProvider() {
+  const explicitBaseUrl = cleanBaseUrl(process.env.LOCAL_LLM_BASE_URL || process.env.OPENAI_BASE_URL);
+  const explicitModel = normalizeWhitespace(process.env.LOCAL_LLM_MODEL || process.env.OPENAI_MODEL || '');
+  const candidates = explicitBaseUrl
+    ? [{ baseUrl: explicitBaseUrl, model: explicitModel, label: 'explicit' }]
+    : [
+        { baseUrl: 'http://127.0.0.1:11434/v1', model: explicitModel, label: 'ollama' },
+        { baseUrl: 'http://127.0.0.1:1234/v1', model: explicitModel, label: 'lmstudio' }
+      ];
+
+  for (const candidate of candidates) {
+    const model = candidate.model || await detectLocalModel(candidate.baseUrl, candidate.label);
+    if (model) return { ...candidate, model };
+  }
+
+  return null;
+}
+
+async function detectLocalModel(baseUrl, label) {
+  const normalized = cleanBaseUrl(baseUrl);
+  const modelList = await requestJson(`${normalized}/models`);
+  const firstModel = modelList?.data?.[0]?.id || modelList?.data?.[0]?.name || modelList?.models?.[0]?.id || modelList?.models?.[0]?.name;
+  if (firstModel) return String(firstModel);
+
+  if (label === 'ollama' || normalized.includes('11434')) {
+    const ollamaModels = await requestJson(`${normalized.replace(/\/v1$/, '')}/api/tags`);
+    const firstOllamaModel = ollamaModels?.models?.[0]?.name;
+    if (firstOllamaModel) return String(firstOllamaModel);
+  }
+
+  return '';
+}
+
+async function callChatCompletions({ baseUrl, apiKey = '', model, messages, temperature, responseFormat }) {
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const response = await fetch(`${cleanBaseUrl(baseUrl)}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model,
+      temperature,
+      response_format: responseFormat,
+      messages
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Chat completion error: ${text}`);
+  }
+
+  const payload = await response.json();
+  return payload?.choices?.[0]?.message?.content || '';
+}
+
+async function getPreferredChatProvider() {
+  if (hasOpenAIKey()) {
+    return {
+      kind: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: process.env.OPENAI_API_KEY || '',
+      model: 'gpt-4o-mini'
+    };
+  }
+
+  const localProvider = await discoverLocalChatProvider();
+  if (localProvider) {
+    return {
+      kind: 'local',
+      baseUrl: localProvider.baseUrl,
+      apiKey: '',
+      model: localProvider.model
+    };
+  }
+
+  return null;
+}
+
+// OpenAI 호환 Chat Completion API 또는 로컬 LLM 서버를 호출해 3가지 제안을 빌드하는 헬퍼
 async function callOpenAIRewriteVariants(transcript, hint) {
-  const apiKey = process.env.OPENAI_API_KEY || '';
-  if (!apiKey) throw new Error('서버에 OpenAI API Key 설정이 필요합니다. (.env 확인)');
+  const cleanFallback = normalizeWhitespace(transcript);
+  const provider = await getPreferredChatProvider();
+  if (!provider) {
+    return buildRewriteVariants(cleanFallback);
+  }
 
   const systemContent = `화자는 한국어와 영어를 수시로 혼용하는 IT 엔지니어/개발자입니다.
 브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음이나 띄어쓰기 오류로 깨져서 오인식되었을 수 있습니다.
@@ -140,59 +261,53 @@ ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
 
 설명은 절대로 덧붙이지 말고 오직 JSON(v1, v2, v3)만 리턴하십시오.`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
+  try {
+    const content = await callChatCompletions({
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model,
       temperature: 0.35,
-      response_format: { type: 'json_object' },
+      responseFormat: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemContent },
         { role: 'user', content: JSON.stringify({ transcript }) }
       ]
-    })
-  });
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`GPT API Error: ${text}`);
+    const parsed = JSON.parse(content);
+    return [
+      { id: 'possibility-1', label: '제안 1 · 원문 보정', text: parsed?.v1 || cleanFallback },
+      { id: 'possibility-2', label: '제안 2 · 자연스러운 문장', text: parsed?.v2 || cleanFallback },
+      { id: 'possibility-3', label: '제안 3 · 정리된 문장', text: parsed?.v3 || cleanFallback }
+    ];
+  } catch (error) {
+    console.error('LLM 제안 생성 실패, 로컬 결정적 폴백 사용:', error);
+    return buildRewriteVariants(cleanFallback);
   }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  const parsed = JSON.parse(content);
-  const cleanFallback = String(transcript ?? '').trim();
-
-  return [
-    { id: 'possibility-1', label: '제안 1 · 원문 보정', text: parsed?.v1 || cleanFallback },
-    { id: 'possibility-2', label: '제안 2 · 자연스러운 문장', text: parsed?.v2 || cleanFallback },
-    { id: 'possibility-3', label: '제안 3 · 정리된 문장', text: parsed?.v3 || cleanFallback }
-  ];
 }
 
 async function callOpenAISummary(transcript, selectedText, hint) {
-  const apiKey = process.env.OPENAI_API_KEY || '';
-  if (!apiKey) throw new Error('서버에 OpenAI API Key 설정이 필요합니다. (.env 확인)');
+  const cleanSelected = normalizeWhitespace(selectedText || transcript);
+  const provider = await getPreferredChatProvider();
+  if (!provider) {
+    return {
+      title: '확정 요약',
+      summary: buildConfirmationSummary(cleanSelected, transcript)
+    };
+  }
 
   const systemContent = `입력된 문장을 아래쪽에 표시할 1~2문장 요약으로 압축하십시오.
 원문을 그대로 반복하지 말고, 확정된 문장의 핵심을 짧고 자연스럽게 정리하십시오.
 반환 양식은 엄격한 JSON 형태입니다. (키: title, summary)
 설명은 절대로 덧붙이지 말고 오직 JSON만 리턴하십시오.`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
+  try {
+    const content = await callChatCompletions({
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model,
       temperature: 0.2,
-      response_format: { type: 'json_object' },
+      responseFormat: { type: 'json_object' },
       messages: [
         {
           role: 'system',
@@ -203,22 +318,20 @@ async function callOpenAISummary(transcript, selectedText, hint) {
           content: JSON.stringify({ transcript, selectedText, hint })
         }
       ]
-    })
-  });
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`GPT API Error: ${text}`);
+    const parsed = JSON.parse(content);
+    return {
+      title: parsed?.title || '확정 요약',
+      summary: parsed?.summary || cleanSelected
+    };
+  } catch (error) {
+    console.error('LLM 요약 생성 실패, 로컬 결정적 폴백 사용:', error);
+    return {
+      title: '확정 요약',
+      summary: buildConfirmationSummary(cleanSelected, transcript)
+    };
   }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  const parsed = JSON.parse(content);
-
-  return {
-    title: parsed?.title || '확정 요약',
-    summary: parsed?.summary || String(selectedText ?? '').trim()
-  };
 }
 
 const server = http.createServer(async (req, res) => {
