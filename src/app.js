@@ -176,10 +176,6 @@ function onRecognitionResult(event) {
   
   // 실시간 변환 갱신용으로 state.transcript 동기화
   state.transcript = baseText;
-  
-  if (state.finalizedSentences.length > 0) {
-    renderVariants();
-  }
 
   setStatus('음성을 듣고 STT로 변환하는 중입니다.');
 }
@@ -228,6 +224,9 @@ function onRecognitionEnd() {
   }
 
   setRecording(false);
+  
+  // [피날레 갱신] 녹음/음성 인식이 완벽히 막을 내린 이 최후의 순간에 전체 완성형 맥락을 기반으로 3가지 가능성을 '단 한번' 기품있게 갱신합니다!
+  renderVariants();
 }
 
 function onTranscriptEdit() {
