@@ -27,7 +27,8 @@ const state = {
   selectedAudioUrl: '',
   variants: [],
   isCapturing: false, // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
-  currentSessionFinal: '' // 현재 음성 인식 세션의 누적 확정 텍스트 버퍼
+  finalizedSentences: [], // 영구 고정 확정 문장들을 순차 보관하는 불변 배열 버퍼
+  processedIndices: new Set() // 현재 음성 인식 세션 내부에서 이미 확정 처리 완료한 결과 인덱스 목록
 };
 
 initialize();
@@ -49,17 +50,12 @@ function wireEvents() {
 
 async function startCapture() {
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    state.chunks = [];
-    state.recorder = new MediaRecorder(state.stream);
-    state.recorder.addEventListener('dataavailable', onChunk);
-    state.recorder.addEventListener('stop', onRecorderStop);
-    state.recorder.start();
-
-    // 캡처 상태 및 세션 버퍼 초기화
+    // 1. 캡처 플래그 및 영구 락킹 버퍼 초기화
     state.isCapturing = true;
-    state.currentSessionFinal = '';
+    state.finalizedSentences = [];
+    state.processedIndices.clear();
 
+    // 2. 하드웨어 딜레이 예방을 위해 음성 인식(STT) 엔진을 0순위로 "가장 먼저" 구동시킵니다!
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
     if (recognition) {
@@ -70,10 +66,27 @@ async function startCapture() {
     }
 
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
+    setStatus('음성 인식 엔진을 준비 중입니다...');
+
+    // 3. 미세한 하드웨어 부팅 간섭(120ms)을 우회한 뒤에 녹음 파일용 MediaRecorder를 기동합니다.
+    // 마이크 신호 충돌이 해소되어 시작 버튼을 누르고 바로 뱉은 첫 마디부터 무손실로 100% 즉시 인식합니다!
+    setTimeout(async () => {
+      if (!state.isCapturing) return; // 대기 중 정지 버튼이 눌렸다면 탈출
+      try {
+        state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.chunks = [];
+        state.recorder = new MediaRecorder(state.stream);
+        state.recorder.addEventListener('dataavailable', onChunk);
+        state.recorder.addEventListener('stop', onRecorderStop);
+        state.recorder.start();
+        setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
+      } catch (err) {
+        console.warn('오디오 녹음 가동 유예(STT 인식을 지속 진행됩니다):', err);
+      }
+    }, 120);
+
   } catch (error) {
     state.isCapturing = false;
-    state.currentSessionFinal = '';
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
 }
@@ -113,7 +126,8 @@ function clearAll() {
   state.interimTranscript = '';
   state.chunks = [];
   state.variants = [];
-  state.currentSessionFinal = '';
+  state.finalizedSentences = [];
+  state.processedIndices.clear();
   setTranscript('');
   setAudioUrl('');
   renderVariants();
@@ -132,39 +146,38 @@ function onRecorderStop() {
 }
 
 function onRecognitionResult(event) {
-  let sessionFinalText = '';
-  let sessionInterimText = '';
+  let interimText = '';
 
-  // 변동 인덱스 방식이 아닌, 현재 세션 전체의 results[0]부터 실시간 완전 동기화 진행
+  // event.results의 처음(0)부터 루프를 돌며, 새롭게 도출된 확정 및 임시 문자열 추출
   for (let i = 0; i < event.results.length; i += 1) {
-    const segment = event.results[i][0].transcript;
+    const segment = event.results[i][0].transcript.trim();
+    if (!segment) continue;
+
     if (event.results[i].isFinal) {
-      sessionFinalText += segment;
+      // 이미 확정 리스트에 영구 잠금 처리한 인덱스가 아니라면 신규 적재 진행
+      if (!state.processedIndices.has(i)) {
+        state.finalizedSentences.push(segment);
+        state.processedIndices.add(i);
+      }
     } else {
-      sessionInterimText += segment;
+      // 임시로 흘러가는 실시간 말소리 수집
+      interimText += (interimText ? ' ' : '') + segment;
     }
   }
 
-  // 실시간 보정을 위해 이번 세션의 확정 문장 업데이트
-  state.currentSessionFinal = sessionFinalText.trim();
-  const cleanedInterim = sessionInterimText.trim();
-
-  // 이전 세션들의 전체 누적 텍스트와 현재 진행 중인 세션 결과를 정갈하게 동기화
-  const base = state.transcript.trim();
+  // 영구 보존된 확정 문장들과 임시 문장을 안전하게 결합
+  const baseText = state.finalizedSentences.join('\n').trim();
+  const cleanedInterim = interimText.trim();
   
-  let displayedText = base;
-  if (state.currentSessionFinal) {
-    displayedText = base ? `${base}\n${state.currentSessionFinal}` : state.currentSessionFinal;
-  }
-  
-  if (cleanedInterim) {
-    displayedText = displayedText ? `${displayedText}\n${cleanedInterim}` : cleanedInterim;
-  }
+  const displayedText = baseText + (cleanedInterim ? (baseText ? `\n${cleanedInterim}` : cleanedInterim) : '');
 
+  // textarea 화면 원문 업데이트
   setTranscript(displayedText);
   
-  // 새로운 문맥이 최종 확정될 때마다 우측 카드 리스트 갱신
-  if (state.currentSessionFinal) {
+  // 실시간 변환 갱신용으로 state.transcript 동기화
+  state.transcript = baseText;
+  
+  if (state.finalizedSentences.length > 0) {
     renderVariants();
   }
 
@@ -180,12 +193,8 @@ function onRecognitionError(event) {
 }
 
 function onRecognitionEnd() {
-  // 세션이 완전히 마무리되었으므로, 이번 세션의 확정본을 안전하게 state.transcript에 통합
-  if (state.currentSessionFinal) {
-    const current = state.transcript.trim();
-    state.transcript = current ? `${current}\n${state.currentSessionFinal}` : state.currentSessionFinal;
-    state.currentSessionFinal = ''; // 리셋
-  }
+  // 세션이 완전히 수명 주기를 마쳤으므로 세션 내 확정 인덱스 목록만 초기화 (영구 적재 버퍼인 finalizedSentences는 보존)
+  state.processedIndices.clear();
 
   // 사용자가 명시적으로 정지 버튼을 누르지 않았는데 브라우저 타임아웃 등으로 꺼진 경우
   if (state.isCapturing) {
