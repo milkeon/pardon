@@ -148,10 +148,8 @@ export function buildRewriteVariants(text) {
 
   const profile = deriveContextProfile(rawText);
   const phonetic = buildPhoneticVariant(rawText);
-  const balanced = looksLikeConversation(rawText)
-    ? buildDialogueVariant(rawText, profile)
-    : buildPoliteVariant(rawText);
-  const organized = buildSummaryVariant(rawText, profile);
+  const balanced = buildBalancedVariant(rawText, profile);
+  const organized = buildOrganizedVariant(rawText, profile);
 
   return [
     {
@@ -235,6 +233,48 @@ function buildCombinedVariant(text, profile, phonetic, contextual) {
   const merged = normalizeWhitespace(selectedClauses.join(' '));
   if (!merged) return contextual || phonetic || ensureSentenceEnding(normalizeWhitespace(text));
   return ensureSentenceEnding(merged);
+}
+
+function buildBalancedVariant(text, profile) {
+  const lower = normalizeWhitespace(text).toLowerCase();
+  switch (profile.mlFocus?.label) {
+    case 'action':
+      if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+        return '팀에 업데이트를 보내야 합니다.';
+      }
+      return buildActionVariant(text);
+    case 'question':
+      return buildQuestionVariant(text);
+    case 'apology':
+      return buildApologyVariant(text);
+    case 'summary':
+      return buildUpdateVariant(text);
+    case 'polite':
+      return buildPoliteVariant(text);
+    default:
+      return looksLikeConversation(text) ? buildDialogueVariant(text, profile) : buildPoliteVariant(text);
+  }
+}
+
+function buildOrganizedVariant(text, profile) {
+  const lower = normalizeWhitespace(text).toLowerCase();
+  switch (profile.mlFocus?.label) {
+    case 'action':
+      if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+        return '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다.';
+      }
+      return buildCombinedActionVariant(text);
+    case 'question':
+      return buildQuestionVariant(text);
+    case 'apology':
+      return buildApologyVariant(text);
+    case 'summary':
+      return buildSummaryVariant(text, profile);
+    case 'polite':
+      return buildPoliteVariant(text);
+    default:
+      return buildSummaryVariant(text, profile);
+  }
 }
 
 function buildDialogueVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {

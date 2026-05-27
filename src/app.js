@@ -1,6 +1,6 @@
-import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js';
-import { mergeRecognitionResults } from './stt.js';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js';
+import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=f2c31e5';
+import { mergeRecognitionResults } from './stt.js?v=f2c31e5';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=f2c31e5';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
