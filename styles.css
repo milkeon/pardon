@@ -230,9 +230,51 @@ h1 {
   width: 100%;
 }
 
-.variant-list {
-  display: grid;
-  gap: 14px;
+.variant-guide {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.variant-guide__title {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #dbe5ff;
+}
+
+.variant-guide__list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.variant-guide__list li + li {
+  margin-top: 4px;
+}
+
+.variant-card__meta {
+  display: block;
+  margin-bottom: 8px;
+  color: #9fb2dd;
+  font-size: 0.85rem;
+}
+
+.variant-card__diff {
+  display: block;
+  margin-top: 10px;
+  color: #a7b6da;
+  font-size: 0.84rem;
+}
+
+.diff-token {
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(250, 204, 21, 0.24);
+  color: #fff4b0;
 }
 
 .variant-card {

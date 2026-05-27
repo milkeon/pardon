@@ -198,14 +198,19 @@ function renderVariantCards(variants) {
     state.selectedVariantId = variants[0]?.id || 'possibility-1';
   }
 
+  const sourceText = normalizeWhitespace(els.transcript.value || state.transcript);
+
   variants.forEach((variant) => {
+    const comparison = buildVariantComparison(sourceText, variant.text);
     const card = document.createElement('button');
     card.type = 'button';
     card.className = `variant-card ${state.selectedVariantId === variant.id ? 'is-selected' : ''}`;
     card.dataset.variantId = variant.id;
     card.innerHTML = `
       <span class="variant-card__label">${variant.label}</span>
-      <span class="variant-card__text">${escapeHtml(variant.text).replace(/\n/g, '<br>')}</span>
+      <span class="variant-card__meta">원문 대비 ${comparison.changedCount === 0 ? '변경 없음' : `${comparison.changedCount}곳 변경`}</span>
+      <span class="variant-card__text">${comparison.html}</span>
+      <span class="variant-card__diff">${comparison.summary}</span>
     `;
     card.addEventListener('click', () => {
       state.selectedVariantId = variant.id;
@@ -213,6 +218,78 @@ function renderVariantCards(variants) {
     });
     els.variantList.appendChild(card);
   });
+}
+
+function buildVariantComparison(sourceText, variantText) {
+  const sourceTokens = tokenizeForDiff(sourceText);
+  const variantTokens = tokenizeForDiff(variantText);
+
+  if (!sourceTokens.length || !variantTokens.length) {
+    return {
+      changedCount: 0,
+      html: escapeHtml(variantText),
+      summary: '차이를 계산할 수 없습니다.'
+    };
+  }
+
+  const markedTokens = markChangedTokens(sourceTokens, variantTokens);
+  const changedCount = markedTokens.filter(Boolean).length;
+  const html = variantTokens
+    .map((token, index) => (markedTokens[index] ? `<mark class="diff-token">${escapeHtml(token)}</mark>` : escapeHtml(token)))
+    .join(' ');
+
+  return {
+    changedCount,
+    html,
+    summary: changedCount === 0 ? '원문과 거의 동일합니다.' : '노란색이 원문에서 바뀐 부분입니다.'
+  };
+}
+
+function tokenizeForDiff(value) {
+  return normalizeWhitespace(value).split(' ').filter(Boolean);
+}
+
+function markChangedTokens(sourceTokens, variantTokens) {
+  const sourceLength = sourceTokens.length;
+  const variantLength = variantTokens.length;
+  const dp = Array.from({ length: sourceLength + 1 }, () => Array(variantLength + 1).fill(0));
+
+  for (let i = sourceLength - 1; i >= 0; i -= 1) {
+    for (let j = variantLength - 1; j >= 0; j -= 1) {
+      if (sourceTokens[i] === variantTokens[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+
+  const marked = Array(variantLength).fill(false);
+  let i = 0;
+  let j = 0;
+
+  while (i < sourceLength && j < variantLength) {
+    if (sourceTokens[i] === variantTokens[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i += 1;
+      continue;
+    }
+
+    marked[j] = true;
+    j += 1;
+  }
+
+  while (j < variantLength) {
+    marked[j] = true;
+    j += 1;
+  }
+
+  return marked;
 }
 
 function handleGenerateClicked() {

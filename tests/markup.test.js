@@ -10,6 +10,8 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('녹음 시작'));
   assert.ok(html.includes('원문 STT'));
   assert.ok(html.includes('가능성 3가지'));
+  assert.ok(html.includes('차이 읽는 법'));
+  assert.ok(html.includes('노란색'));
   assert.ok(html.includes('선택한 문장 복사'));
   assert.ok(html.includes('spellcheck="false"'));
   assert.ok(html.includes('autocorrect="off"'));
