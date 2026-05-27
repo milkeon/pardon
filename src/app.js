@@ -9,7 +9,6 @@ const els = {
   clearButton: document.querySelector('[data-action="clear"]'),
   generateButton: document.querySelector('[data-action="generate"]'),
   copyButton: document.querySelector('[data-action="copy"]'),
-  confirmButton: document.querySelector('[data-action="confirm"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
   audioPlayback: document.querySelector('#audio-playback'),
@@ -68,7 +67,6 @@ function wireEvents() {
   els.clearButton.addEventListener('click', clearAll);
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
-  els.confirmButton?.addEventListener('click', handleConfirmClicked);
   els.transcript.addEventListener('input', onTranscriptEdit);
 }
 
@@ -256,26 +254,40 @@ function renderVariantCards(variants) {
 
   variants.forEach((variant) => {
     const comparison = buildVariantComparison(sourceText, variant.text);
-    const card = document.createElement('button');
-    card.type = 'button';
+    const card = document.createElement('article');
     card.className = `variant-card ${state.selectedVariantId === variant.id ? 'is-selected' : ''}`;
     card.dataset.variantId = variant.id;
     card.innerHTML = `
-      <span class="variant-card__label">${variant.label}</span>
-      <span class="variant-card__meta">원문 대비 ${comparison.changedCount === 0 ? '변경 없음' : `${comparison.changedCount}곳 변경`}</span>
-      <span class="variant-card__text">${comparison.html}</span>
-      <span class="variant-card__diff">${comparison.summary}</span>
+      <div class="variant-card__body">
+        <span class="variant-card__label">${variant.label}</span>
+        <span class="variant-card__meta">원문 대비 ${comparison.changedCount === 0 ? '변경 없음' : `${comparison.changedCount}곳 변경`}</span>
+        <span class="variant-card__text">${comparison.html}</span>
+        <span class="variant-card__diff">${comparison.summary}</span>
+      </div>
+      <div class="variant-card__actions">
+        <button class="button button--small" type="button" data-action="select-variant">선택</button>
+        <button class="button button--primary button--small" type="button" data-action="confirm-variant">확정</button>
+      </div>
     `;
+
     card.addEventListener('click', () => {
       state.selectedVariantId = variant.id;
       renderVariantCards(variants);
-      showToast('복사되었습니다');
-      copyTextToClipboard(variant.text).then((copied) => {
-        if (!copied) {
-          setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
-        }
-      });
     });
+
+    card.querySelector('[data-action="select-variant"]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.selectedVariantId = variant.id;
+      renderVariantCards(variants);
+      showToast('선택했습니다');
+      setStatus(`제안 ${variant.label}을 선택했습니다.`);
+    });
+
+    card.querySelector('[data-action="confirm-variant"]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void confirmVariant(variant);
+    });
+
     els.variantList.appendChild(card);
   });
 }
@@ -397,33 +409,38 @@ async function copySelectedVariant() {
   }
 }
 
-async function handleConfirmClicked() {
+async function confirmVariant(variant) {
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
   if (!transcript) {
     setStatus('먼저 원문이 있어야 확정할 수 있습니다.');
     return;
   }
 
-  const variants = state.variants.length ? state.variants : buildRewriteVariants(transcript);
-  const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
+  const selected = variant || state.variants.find((item) => item.id === state.selectedVariantId) || state.variants[0] || buildRewriteVariants(transcript)[0];
   if (!selected) {
     setStatus('먼저 제안을 만든 뒤 확정해 주세요.');
     return;
   }
 
+  state.selectedVariantId = selected.id;
   state.isSummarizing = true;
   setActionControlsDisabled(true);
-  setStatus('확정한 내용을 아래에 요약하는 중입니다.');
+  setStatus(`확정한 ${selected.label}을 아래에 요약하는 중입니다.`);
 
   try {
     const remoteSummary = await fetchConfirmationSummary(selected.text, transcript);
     const summaryText = remoteSummary?.summary || buildConfirmationSummary(selected.text, transcript);
     renderConfirmedSummary(summaryText, selected.label);
-    setStatus('확정한 제안을 아래에 요약해서 보여줍니다.');
+    setStatus('선택한 제안을 아래에 요약해서 보여줍니다.');
+    renderVariantCards(state.variants.length ? state.variants : buildRewriteVariants(transcript));
   } finally {
     state.isSummarizing = false;
     setActionControlsDisabled(false);
   }
+}
+
+async function handleConfirmClicked() {
+  await confirmVariant();
 }
 
 function createSpeechRecognition() {
