@@ -1,7 +1,7 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-1';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-1';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-1';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-1';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-2';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-2';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-2';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-2';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -265,7 +265,7 @@ function renderVariantCards(variants) {
         <span class="variant-card__diff">${comparison.summary}</span>
       </div>
       <div class="variant-card__actions">
-        <button class="button button--small" type="button" data-action="select-variant">선택</button>
+        <button class="button button--small" type="button" data-action="copy-variant">복사</button>
         <button class="button button--primary button--small" type="button" data-action="confirm-variant">확정</button>
       </div>
     `;
@@ -275,12 +275,9 @@ function renderVariantCards(variants) {
       renderVariantCards(variants);
     });
 
-    card.querySelector('[data-action="select-variant"]')?.addEventListener('click', (event) => {
+    card.querySelector('[data-action="copy-variant"]')?.addEventListener('click', async (event) => {
       event.stopPropagation();
-      state.selectedVariantId = variant.id;
-      renderVariantCards(variants);
-      showToast('선택했습니다');
-      setStatus(`제안 ${variant.label}을 선택했습니다.`);
+      await copyVariant(variant);
     });
 
     card.querySelector('[data-action="confirm-variant"]')?.addEventListener('click', (event) => {
@@ -400,10 +397,30 @@ async function copySelectedVariant() {
   const variants = state.variants.length ? state.variants : buildRewriteVariants(transcript);
   const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
 
+  await copyVariant(selected);
+}
+
+async function copyVariant(variant) {
+  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  if (!transcript) {
+    setStatus('먼저 원문이 있어야 복사할 수 있습니다.');
+    return;
+  }
+
+  const selected = variant || state.variants.find((item) => item.id === state.selectedVariantId) || state.variants[0] || buildRewriteVariants(transcript)[0];
+  if (!selected) {
+    setStatus('먼저 제안을 만든 뒤 복사해 주세요.');
+    return;
+  }
+
   const copied = await copyTextToClipboard(selected?.text || '');
   if (copied) {
     showToast('복사되었습니다');
-    setStatus('선택한 제안을 클립보드에 복사했습니다.');
+    state.selectedVariantId = selected.id;
+    if (state.variants.length) {
+      renderVariantCards(state.variants);
+    }
+    setStatus(`${selected.label}을 클립보드에 복사했습니다.`);
   } else {
     setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
   }
@@ -429,9 +446,12 @@ async function confirmVariant(variant) {
 
   try {
     const remoteSummary = await fetchConfirmationSummary(selected.text, transcript);
-    const summaryText = remoteSummary?.summary || buildConfirmationSummary(selected.text, transcript);
+    const localSummary = buildConfirmationSummary(selected.text, transcript);
+    const remoteSummaryText = normalizeWhitespace(remoteSummary?.summary || '');
+    const selectedText = normalizeWhitespace(selected.text);
+    const summaryText = remoteSummaryText && remoteSummaryText !== selectedText ? remoteSummaryText : localSummary;
     renderConfirmedSummary(summaryText, selected.label);
-    setStatus('선택한 제안을 아래에 요약해서 보여줍니다.');
+    setStatus('확정한 제안을 아래에 더 짧게 정리해서 보여줍니다.');
     renderVariantCards(state.variants.length ? state.variants : buildRewriteVariants(transcript));
   } finally {
     state.isSummarizing = false;
@@ -530,9 +550,6 @@ function setActionControlsDisabled(isBusy) {
   const hasVariants = state.variants.length > 0;
   els.generateButton.disabled = isBusy;
   els.copyButton.disabled = isBusy || !hasTranscript || !hasVariants;
-  if (els.confirmButton) {
-    els.confirmButton.disabled = isBusy || !hasTranscript || !hasVariants;
-  }
 }
 
 async function startVoiceActivityMonitor() {

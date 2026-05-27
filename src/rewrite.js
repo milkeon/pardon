@@ -177,34 +177,67 @@ export function buildConfirmationSummary(text, sourceText = '') {
   }
 
   const profile = deriveContextProfile(sourceText || text);
-  const structure = analyzeTranscriptStructure(text, profile);
-  const cleanedClauses = (structure.clauses.length ? structure.clauses : splitTranscriptClauses(baseText))
-    .map((clause) => tightenSentence(applyTranscriptCorrections(cleanSpokenKorean(clause))))
-    .filter(Boolean);
-
-  if (cleanedClauses.length === 0) {
-    return ensureSentenceEnding(baseText);
+  const structure = analyzeTranscriptStructure(sourceText || text, profile);
+  const summary = buildConfirmationDigest(baseText, profile, structure, sourceText || text);
+  if (summary && normalizeWhitespace(summary) !== baseText) {
+    return summary;
   }
 
-  if (cleanedClauses.length === 1) {
-    const single = ensureSentenceEnding(cleanedClauses[0]);
-    return single.length <= baseText.length ? single : ensureSentenceEnding(baseText);
-  }
-
-  const head = cleanedClauses[0];
-  const headTwo = normalizeWhitespace(cleanedClauses.slice(0, 2).join(' '));
-  const candidate = head.length >= 24 ? head : headTwo;
-
-  if (candidate && candidate.length < baseText.length) {
-    return ensureSentenceEnding(candidate);
-  }
-
-  const polished = buildSummaryVariant(text, profile, structure);
-  if (polished && polished.length < baseText.length) {
+  const polished = buildSummaryVariant(sourceText || text, profile, structure);
+  if (polished && normalizeWhitespace(polished) !== baseText) {
     return polished;
   }
 
-  return ensureSentenceEnding(head || baseText);
+  return compressConfirmationPhrase(baseText);
+}
+
+function buildConfirmationDigest(baseText, profile, structure, sourceText) {
+  const source = normalizeWhitespace(sourceText || baseText);
+  const clauses = dedupeClauses(
+    (structure.clauses.length ? structure.clauses : splitTranscriptClauses(source))
+      .map((clause) => tightenSentence(applyTranscriptCorrections(cleanSpokenKorean(clause))))
+      .filter(Boolean)
+  );
+  const fragments = extractSalientFragments(source, profile, structure, 2)
+    .map((fragment) => compressConfirmationPhrase(fragment))
+    .filter(Boolean);
+
+  const candidate = normalizeWhitespace(
+    fragments.length > 1
+      ? fragments.join(' · ')
+      : fragments[0] || clauses[0] || compressConfirmationPhrase(baseText)
+  );
+
+  if (!candidate) {
+    return '';
+  }
+
+  if (candidate.length < baseText.length) {
+    return ensureSentenceEnding(candidate);
+  }
+
+  const shortened = compressConfirmationPhrase(clauses[0] || candidate || baseText);
+  if (shortened && shortened.length < baseText.length) {
+    return ensureSentenceEnding(shortened);
+  }
+
+  return ensureSentenceEnding(shortened || candidate);
+}
+
+function compressConfirmationPhrase(text) {
+  return normalizeWhitespace(text)
+    .replace(/^실행 관점에서 정리하면[,\s]*/i, '')
+    .replace(/^질문하신 내용을 정리하면[,\s]*/i, '')
+    .replace(/^말씀드리면[,\s]*/i, '')
+    .replace(/^죄송하지만 정리하면[,\s]*/i, '')
+    .replace(/^핵심[:\s-]*/i, '')
+    .replace(/^요약[:\s-]*/i, '')
+    .replace(/(해야\s+합니다|해야\s+해요|해야\s+돼요|필요합니다|필요해요|입니다|예요|합니다|해요|돼요|할 수 있습니다|가능합니다)\.?$/g, '')
+    .replace(/\b(정말|진짜|사실)\b/g, '')
+    .replace(/\s+(그리고|또)\s+/g, ' · ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildPhoneticVariant(text) {

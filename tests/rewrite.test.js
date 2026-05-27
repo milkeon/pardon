@@ -66,11 +66,13 @@ test('buildRewriteVariants는 긴 문맥 입력을 실제로 재구성한다', (
   assert.ok(!/^(핵심은|그리고|정리하면|정리해 보면)\b/.test(variants[2].text));
 });
 
-test('buildConfirmationSummary는 확정 내용을 아래 요약으로 줄여준다', () => {
-  const summary = buildConfirmationSummary('팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다. 오늘 안에 확인도 필요합니다.');
+test('buildConfirmationSummary는 확정 내용을 원문보다 짧게 정리한다', () => {
+  const source = '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다. 오늘 안에 확인도 필요합니다.';
+  const summary = buildConfirmationSummary(source);
 
   assert.ok(summary.length > 0);
-  assert.ok(summary.length < 80);
+  assert.ok(summary.length < source.length);
+  assert.notEqual(summary, normalizeWhitespace(source));
   assert.ok(summary.includes('팀에 업데이트') || summary.includes('진행 상황'));
   assert.ok(!summary.includes('오늘 안에 확인도 필요합니다'));
 });
