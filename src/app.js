@@ -125,7 +125,7 @@ function stopCapture() {
   state.variants = [];
   renderVariantPlaceholder('정지했습니다. 변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 이제 변환 버튼으로 3가지 가능성을 만드세요.');
+  setStatus('녹음을 종료했습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.');
   state.isStopping = false;
 }
 
@@ -345,13 +345,13 @@ function handleGenerateClicked() {
   if (!transcript) {
     state.variants = [];
     renderVariantPlaceholder('먼저 원문이 있어야 변환할 수 있습니다.');
-    setStatus('먼저 원문이 있어야 가능성을 계산할 수 있습니다.');
+    setStatus('먼저 원문이 있어야 제안을 계산할 수 있습니다.');
     return;
   }
 
   state.variants = buildRewriteVariants(transcript);
   renderVariants();
-  setStatus('현재 원문 기준으로 3가지 가능성을 변환했습니다.');
+  setStatus('현재 원문 기준으로 3가지 제안을 변환했습니다.');
 }
 
 async function copySelectedVariant() {
@@ -367,7 +367,7 @@ async function copySelectedVariant() {
   const copied = await copyTextToClipboard(selected?.text || '');
   if (copied) {
     showToast('복사되었습니다');
-    setStatus('선택한 가능성을 클립보드에 복사했습니다.');
+    setStatus('선택한 제안을 클립보드에 복사했습니다.');
   } else {
     setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
   }
