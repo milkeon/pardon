@@ -8,7 +8,6 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
-  apiKey: document.querySelector('#api-key'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   recordingBadge: document.querySelector('#recording-badge'),
@@ -145,57 +144,30 @@ function onRecorderStop() {
   const audioUrl = URL.createObjectURL(blob);
   setAudioUrl(audioUrl);
 
-  // API 키가 존재하면, 엉터리 브라우저 STT를 전면 생략하고 세계 최고 수준의 Whisper STT 모델로 분석합니다!
-  const apiKey = normalizeWhitespace(els.apiKey.value);
-  if (apiKey) {
-    setStatus('세계 최고의 음성 모델 OpenAI Whisper로 음성을 초정밀 분석하는 중입니다...');
-    transcribeAudioWithWhisper(blob, apiKey)
-      .then((whisperResult) => {
-        state.transcript = whisperResult;
-        setTranscript(whisperResult);
-        
-        setStatus('Whisper 분석 완료! GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
-        return generateRemoteVariants({ transcript: whisperResult, apiKey });
-      })
-      .then((remoteVariants) => {
-        state.variants = remoteVariants;
-        renderVariantCards(remoteVariants);
-        setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
-      })
-      .catch((err) => {
-        console.error('Whisper/GPT 분석 실패:', err);
-        setStatus(`원격 머신러닝 분석에 실패했습니다: ${friendlyError(err)}`);
-        renderVariants(); // 실패 시 로컬 폴백 작동
-      });
-  } else {
-    // API 키가 없는 로컬 데모에서는 기존처럼 브라우저 STT 결과를 바탕으로 정적 해석 대안 노출
-    renderVariants();
-  }
+  // 번거로운 브라우저 API 키 요구 및 설정 없이 켜자마자 바로 백엔드 초정밀 머신러닝 분석을 연동합니다!
+  setStatus('세계 최고의 음성 모델 OpenAI Whisper로 음성을 초정밀 분석하는 중입니다...');
+  
+  transcribeAudioWithServer(blob)
+    .then((whisperResult) => {
+      state.transcript = whisperResult;
+      setTranscript(whisperResult);
+      
+      setStatus('Whisper 분석 완료! GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
+      return generateServerVariants(whisperResult);
+    })
+    .then((remoteVariants) => {
+      state.variants = remoteVariants;
+      renderVariantCards(remoteVariants);
+      setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
+    })
+    .catch((err) => {
+      console.error('서버 머신러닝 분석 실패:', err);
+      setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
+      renderVariants(); // 실패 시 로컬 엔진 폴백
+    });
 }
 
-async function transcribeAudioWithWhisper(audioBlob, apiKey) {
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'recording.webm');
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'ko');
-  // 개발용 IT 힌트를 Whisper에게 제공하여 전문 단어 인식률을 극한으로 상향
-  formData.append('prompt', 'SQLD, ADsP, 블로그, API, Git, commit, Docker, Database, 포트, 서버, 깃 커밋');
 
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: formData
-  });
-
-  if (!response.ok) {
-    throw new Error(`Whisper STT 분석 실패 (${response.status})`);
-  }
-
-  const data = await response.json();
-  return data.text || '';
-}
 
 function onRecognitionResult(event) {
   let interimText = '';
@@ -320,7 +292,6 @@ function renderVariantCards(variants) {
 
 async function handleGenerateClicked() {
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
-  const apiKey = normalizeWhitespace(els.apiKey.value);
 
   if (!transcript) {
     setStatus('원문을 먼저 추가하거나 녹음한 뒤 재작성해 주세요.');
@@ -328,27 +299,36 @@ async function handleGenerateClicked() {
     return;
   }
 
-  if (!apiKey) {
-    setStatus('브라우저 API 키가 없어서 로컬 결정적 재작성 엔진을 사용합니다.');
-    renderVariants();
-    return;
-  }
-
   els.generateButton.disabled = true;
-  setStatus('브라우저에 내장된 OpenAI로 재작성 안을 생성하는 중입니다...');
+  setStatus('GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
 
   try {
-    const remoteVariants = await generateRemoteVariants({ transcript, apiKey });
+    const remoteVariants = await generateServerVariants(transcript);
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
-    setStatus('OpenAI로 재작성 안을 생성했습니다.');
+    setStatus('OpenAI로 머신러닝 분석을 완료했습니다.');
   } catch (error) {
     state.variants = buildRewriteVariants(transcript);
     renderVariantCards(state.variants);
-    setStatus(`원격 생성에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
+    setStatus(`원격 분석에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
     els.generateButton.disabled = false;
   }
+}
+
+async function generateServerVariants(transcript) {
+  const response = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transcript })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(err || '서버 문맥 조립 실패');
+  }
+
+  return await response.json();
 }
 
 async function copySelectedVariant() {
@@ -378,46 +358,6 @@ function createSpeechRecognition() {
   recognition.maxAlternatives = 3; // 인식 민감도 및 발음 대안 후보 정밀도 최대치 부여
   recognition.lang = 'ko-KR';
   return recognition;
-}
-
-async function generateRemoteVariants({ transcript, apiKey }) {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: '화자는 한국어와 영어를 수시로 혼용하여 사용하는 IT 엔지니어/개발자입니다. 브라우저 머신러닝의 한계로 인해, 영어를 강제로 억지 한글 발음으로 받아썼거나(예: "에이피아이", "커밋해줘", "도커") 발음이 심하게 꼬여 오인식되었을 확률이 매우 높습니다. 해당 발음이 본래 무엇을 의미하려 한 것인지 유유히 유추하여, 영어(API, Git, commit, Docker, DB, PR, server 등)와 한글이 올바르게 혼용된 고도로 자연스러운 실무 개발자 문장 3가지 가능성을 엄격한 JSON 형태로 추정 반환하십시오. 키는 p1, p2, p3만 사용하고, 설명은 절대로 덧붙이지 마세요.'
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({ transcript })
-        }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`원격 생성 요청이 실패했습니다 (${response.status})`);
-  }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  const parsed = parseJsonMaybe(content);
-  const localFallback = buildRewriteVariants(transcript);
-
-  return [
-    { id: 'p1', label: '가능성 1 (가장 유력)', text: finalizeVariantText(parsed?.p1 || '') || localFallback[0].text },
-    { id: 'p2', label: '가능성 2 (유사 발음 교정)', text: finalizeVariantText(parsed?.p2 || '') || localFallback[1].text },
-    { id: 'p3', label: '가능성 3 (구어 정돈 보정)', text: finalizeVariantText(parsed?.p3 || '') || localFallback[2].text }
-  ];
 }
 
 function parseJsonMaybe(value) {
