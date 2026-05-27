@@ -27,7 +27,8 @@ const state = {
   variants: [],
   isCapturing: false, // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
   finalizedSentences: [], // 영구 고정 확정 문장들을 순차 보관하는 불변 배열 버퍼
-  processedIndices: new Set() // 현재 음성 인식 세션 내부에서 이미 확정 처리 완료한 결과 인덱스 목록
+  processedIndices: new Set(), // 현재 음성 인식 세션 내부에서 이미 확정 처리 완료한 결과 인덱스 목록
+  lastInterimText: '' // 세션 만료 시 임시 텍스트 공중분해 방지를 위한 실시간 백업 버퍼
 };
 
 initialize();
@@ -49,12 +50,35 @@ function wireEvents() {
 
 async function startCapture() {
   try {
-    // 1. 캡처 플래그 및 영구 락킹 버퍼 초기화
+    // 1. 캡처 플래그 활성화
     state.isCapturing = true;
-    state.finalizedSentences = [];
-    state.processedIndices.clear();
 
-    // 2. 하드웨어 딜레이 예방을 위해 음성 인식(STT) 엔진을 0순위로 "가장 먼저" 구동시킵니다!
+    // [무한 누적 보존] 이전 원문 텍스트를 날려버리지 않고, 영구 락킹 버퍼에 이식하여 무한 상속시킵니다!
+    const existingText = (els.transcript.value || state.transcript).trim();
+    if (existingText) {
+      state.finalizedSentences = existingText.split('\n').map(line => line.trim()).filter(Boolean);
+    } else {
+      state.finalizedSentences = [];
+    }
+    state.processedIndices.clear();
+    state.lastInterimText = ''; // 임시 버퍼 리셋
+
+    // 2. [마이크 장치 선안정화] 먼저 마이크 권한 및 스트림을 완벽히 획득하여 장치를 안정시킵니다.
+    // 가동 중이던 STT 엔진이 getUserMedia 시동에 의해 마이크 장치 가로채기(aborted)로 강제 중단되는 버그를 원천 박멸합니다!
+    setStatus('마이크 장치를 준비 중입니다...');
+    state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.chunks = [];
+
+    if (!state.isCapturing) {
+      // 대기 중 정지 버튼이 눌렸다면 스트림 해제 후 탈출
+      if (state.stream) {
+        state.stream.getTracks().forEach(track => track.stop());
+        state.stream = null;
+      }
+      return;
+    }
+
+    // 3. 마이크 안정화 직후, 음성 인식(STT) 엔진을 즉시 구동시킵니다!
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
     if (recognition) {
@@ -67,13 +91,11 @@ async function startCapture() {
     setRecording(true);
     setStatus('음성 인식 엔진을 준비 중입니다...');
 
-    // 3. 미세한 하드웨어 부팅 간섭(120ms)을 우회한 뒤에 녹음 파일용 MediaRecorder를 기동합니다.
-    // 마이크 신호 충돌이 해소되어 시작 버튼을 누르고 바로 뱉은 첫 마디부터 무손실로 100% 즉시 인식합니다!
-    setTimeout(async () => {
-      if (!state.isCapturing) return; // 대기 중 정지 버튼이 눌렸다면 탈출
+    // 4. 미세한 하드웨어 부팅 간섭(120ms)을 우회한 뒤에 녹음 파일용 MediaRecorder를 기동합니다.
+    // STT 엔진이 자리를 잡은 상태에서 녹음기가 가동되어 시작 즉시 뱉은 첫 마디부터 무손실로 100% 즉시 인식합니다!
+    setTimeout(() => {
+      if (!state.isCapturing || !state.stream) return;
       try {
-        state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        state.chunks = [];
         state.recorder = new MediaRecorder(state.stream);
         state.recorder.addEventListener('dataavailable', onChunk);
         state.recorder.addEventListener('stop', onRecorderStop);
@@ -86,6 +108,7 @@ async function startCapture() {
 
   } catch (error) {
     state.isCapturing = false;
+    setRecording(false);
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
 }
@@ -93,6 +116,14 @@ async function startCapture() {
 function stopCapture() {
   // 캡처 상태 비활성화
   state.isCapturing = false;
+
+  // [비동기 레이스 컨디션 원천 차단] 멈추는 즉시 아직 확정되지 않은 임시 버퍼가 있다면 강제 영구 적재!
+  if (state.lastInterimText) {
+    state.finalizedSentences.push(state.lastInterimText);
+    state.lastInterimText = ''; // 버퍼 클리어
+    state.transcript = state.finalizedSentences.join('\n').trim();
+    setTranscript(state.transcript);
+  }
 
   if (state.recognition) {
     try {
@@ -127,6 +158,7 @@ function clearAll() {
   state.variants = [];
   state.finalizedSentences = [];
   state.processedIndices.clear();
+  state.lastInterimText = '';
   setTranscript('');
   setAudioUrl('');
   renderVariants();
@@ -149,11 +181,18 @@ function onRecorderStop() {
   
   transcribeAudioWithServer(blob)
     .then((whisperResult) => {
-      state.transcript = whisperResult;
-      setTranscript(whisperResult);
+      // Whisper의 정밀 결과 역시 싹 다 뭉개지 않고 영구 상속 누적시킵니다!
+      const current = state.transcript.trim();
+      const finalWhisper = current ? `${current}\n${whisperResult.trim()}` : whisperResult.trim();
+      
+      state.transcript = finalWhisper;
+      setTranscript(finalWhisper);
+      
+      // Whisper가 덧붙여준 새로운 최종 보존을 락킹 버퍼에 다시 동기화
+      state.finalizedSentences = finalWhisper.split('\n').map(line => line.trim()).filter(Boolean);
       
       setStatus('Whisper 분석 완료! GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
-      return generateServerVariants(whisperResult);
+      return generateServerVariants(finalWhisper);
     })
     .then((remoteVariants) => {
       state.variants = remoteVariants;
@@ -167,7 +206,21 @@ function onRecorderStop() {
     });
 }
 
+async function transcribeAudioWithServer(audioBlob) {
+  const response = await fetch('/api/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/webm' },
+    body: audioBlob
+  });
 
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(err || '서버 STT 분석 실패');
+  }
+
+  const data = await response.json();
+  return data.text || '';
+}
 
 function onRecognitionResult(event) {
   let interimText = '';
@@ -193,6 +246,9 @@ function onRecognitionResult(event) {
   const baseText = state.finalizedSentences.join('\n').trim();
   const cleanedInterim = interimText.trim();
   
+  // 임시 단어가 죽기 전에 낚아챌 수 있도록 실시간 버퍼에 백업해둡니다!
+  state.lastInterimText = cleanedInterim;
+  
   const displayedText = baseText + (cleanedInterim ? (baseText ? `\n${cleanedInterim}` : cleanedInterim) : '');
 
   // textarea 화면 원문 업데이트
@@ -213,6 +269,16 @@ function onRecognitionError(event) {
 }
 
 function onRecognitionEnd() {
+  // 1. [임시 데이터 Rescue] 만약 세션이 닫힐 때 미처 finalizedSentences에 들어가지 못한 임시 텍스트가 있다면 영구 복구 적재!
+  if (state.lastInterimText) {
+    state.finalizedSentences.push(state.lastInterimText);
+    state.lastInterimText = ''; // 소모 완료 리셋
+    
+    // 강제 구제된 텍스트를 원문 텍스트 공간에 안전하게 렌더링 동기화
+    state.transcript = state.finalizedSentences.join('\n').trim();
+    setTranscript(state.transcript);
+  }
+
   // 세션이 완전히 수명 주기를 마쳤으므로 세션 내 확정 인덱스 목록만 초기화 (영구 적재 버퍼인 finalizedSentences는 보존)
   state.processedIndices.clear();
 
@@ -255,6 +321,13 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
+  // 사용자가 수동 수정한 텍스트도 영구 락킹 버퍼에 즉각 동기화하여 날아감 방지!
+  const trimmed = state.transcript.trim();
+  if (trimmed) {
+    state.finalizedSentences = trimmed.split('\n').map(line => line.trim()).filter(Boolean);
+  } else {
+    state.finalizedSentences = [];
+  }
   renderVariants();
 }
 
