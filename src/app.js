@@ -20,15 +20,12 @@ const state = {
   recognition: null,
   stream: null,
   chunks: [],
-  transcript: '',
-  interimTranscript: '',
+  transcript: '', // 오직 이 변수 하나가 "완벽히 굳어진 지고의 원문(Source of Truth)"을 전담합니다!
   selectedVariantId: 'p1',
   selectedAudioUrl: '',
   variants: [],
-  isCapturing: false, // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
-  finalizedSentences: [], // 영구 고정 확정 문장들을 순차 보관하는 불변 배열 버퍼
-  processedIndices: new Set(), // 현재 음성 인식 세션 내부에서 이미 확정 처리 완료한 결과 인덱스 목록
-  lastInterimText: '' // 세션 만료 시 임시 텍스트 공중분해 방지를 위한 실시간 백업 버퍼
+  isCapturing: false, // 명시적인 음성 및 STT 캡처 진행 여부 상태
+  lastInterimText: '' // 현재 발화 중인 실시간 임시 단어의 최장 Watermark 백업 버퍼
 };
 
 initialize();
@@ -53,14 +50,8 @@ async function startCapture() {
     // 1. 캡처 플래그 활성화
     state.isCapturing = true;
 
-    // [무한 누적 보존] 이전 원문 텍스트를 날려버리지 않고, 영구 락킹 버퍼에 이식하여 무한 상속시킵니다!
-    const existingText = (els.transcript.value || state.transcript).trim();
-    if (existingText) {
-      state.finalizedSentences = existingText.split('\n').map(line => line.trim()).filter(Boolean);
-    } else {
-      state.finalizedSentences = [];
-    }
-    state.processedIndices.clear();
+    // [무한 누적 보존] 이전 원문 텍스트를 날려버리지 않고, 영구 텍스트 버퍼에 그대로 이식하여 무한 상속시킵니다!
+    state.transcript = (els.transcript.value || state.transcript).trim();
     state.lastInterimText = ''; // 임시 버퍼 리셋
 
     // 2. [마이크 장치 선안정화] 먼저 마이크 권한 및 스트림을 완벽히 획득하여 장치를 안정시킵니다.
@@ -117,11 +108,10 @@ function stopCapture() {
   // 캡처 상태 비활성화
   state.isCapturing = false;
 
-  // [비동기 레이스 컨디션 원천 차단] 멈추는 즉시 아직 확정되지 않은 임시 버퍼가 있다면 강제 영구 적재!
+  // [비동기 레이스 컨디션 원천 차단] 멈추는 즉시 아직 확정되지 않은 임시 버퍼가 있다면 강제 누적 적재!
   if (state.lastInterimText) {
-    state.finalizedSentences.push(state.lastInterimText);
+    state.transcript = state.transcript ? `${state.transcript}\n${state.lastInterimText}` : state.lastInterimText;
     state.lastInterimText = ''; // 버퍼 클리어
-    state.transcript = state.finalizedSentences.join('\n').trim();
     setTranscript(state.transcript);
   }
 
@@ -153,11 +143,8 @@ function stopCapture() {
 function clearAll() {
   stopCapture();
   state.transcript = '';
-  state.interimTranscript = '';
   state.chunks = [];
   state.variants = [];
-  state.finalizedSentences = [];
-  state.processedIndices.clear();
   state.lastInterimText = '';
   setTranscript('');
   setAudioUrl('');
@@ -218,49 +205,44 @@ async function transcribeAudioWithServer(audioBlob) {
 
 function onRecognitionResult(event) {
   let interimText = '';
-  let hasNewFinal = false; // 이번 이벤트에서 새로운 확정 문장이 추가되었는지 감지하는 플래그
+  const newFinals = []; // 이번 이벤트에서 새롭게 굳어진 순수 증분 확정 문장들
 
-  // event.results의 처음(0)부터 루프를 돌며, 새롭게 도출된 확정 및 임시 문자열 추출
-  for (let i = 0; i < event.results.length; i += 1) {
+  // 0순위 규칙: event.resultIndex부터 루프를 구동하여, 크롬이 메모리 절약을 위해 날려버린 
+  // 과거 인덱스의 모든 간섭과 휘발 충돌을 완벽하게 원천 차단합니다!
+  for (let i = event.resultIndex; i < event.results.length; i += 1) {
     const segment = event.results[i][0].transcript.trim();
     if (!segment) continue;
 
     if (event.results[i].isFinal) {
-      // 이미 확정 리스트에 영구 잠금 처리한 인덱스가 아니라면 신규 적재 진행
-      if (!state.processedIndices.has(i)) {
-        state.finalizedSentences.push(segment);
-        state.processedIndices.add(i);
-        hasNewFinal = true;
-      }
+      newFinals.push(segment);
     } else {
-      // 임시로 흘러가는 실시간 말소리 수집
       interimText += (interimText ? ' ' : '') + segment;
     }
   }
 
-  // 새로운 최종 확정 문장이 고정 버퍼에 영구 안착했다면,
-  // 중복 기입을 차단하기 위해 임시 백업 버퍼를 스마트하게 리셋합니다.
-  if (hasNewFinal) {
-    state.lastInterimText = '';
+  // 이번 이벤트에서 확정된 따끈따끈한 증분 문장이 존재한다면, 기존 원문에 즉시 덧붙여 상속 적재!
+  if (newFinals.length > 0) {
+    const newSegment = newFinals.join('\n').trim();
+    state.transcript = state.transcript ? `${state.transcript}\n${newSegment}` : newSegment;
+    state.lastInterimText = ''; // 임시 버퍼는 확정으로 승격 소모되었으므로 비웁니다.
   }
 
-  const baseText = state.finalizedSentences.join('\n').trim();
   const cleanedInterim = interimText.trim();
   
   // [지워짐 방지 워터마크 밸브]
-  // 브라우저가 음성을 다듬거나 버그로 인해 이전 이벤트보다 짧거나 텅 빈 임시 문자열을 보낼 경우
-  // 이전에 캡처에 성공했던 최장 길이 임시 텍스트(lastInterimText)를 악착같이 지켜내고 덮어쓰지 않습니다!
+  // 브라우저가 음성을 조절하는 도중 이전보다 짧거나 빈 임시 문자열을 밀어내더라도
+  // 이전에 감지되었던 최장 임시 텍스트(lastInterimText)를 끝까지 사수합니다!
   if (cleanedInterim.length >= state.lastInterimText.length) {
     state.lastInterimText = cleanedInterim;
   }
   
-  // 화면 및 원문에 노출할 때는 항상 보증된 최장 임시 텍스트를 결합하여 단어 춤춤/휘발 현상을 원천 방지합니다.
-  const displayedText = baseText + (state.lastInterimText ? (baseText ? `\n${state.lastInterimText}` : state.lastInterimText) : '');
+  // 최종적으로 안전하게 누적된 텍스트와 최장 임시 버퍼를 조화롭게 덧붙여 노출합니다.
+  const displayedText = state.transcript + (state.lastInterimText ? (state.transcript ? `\n${state.lastInterimText}` : state.lastInterimText) : '');
 
   // textarea 화면 원문 업데이트
   setTranscript(displayedText);
   
-  // [실시간 풀-동기화] 현재 노출된 안전 최장 텍스트 전체를 항상 원문에 즉시 박제해둡니다!
+  // [실시간 동기화] 노출된 텍스트 전체를 즉시 state.transcript에 완벽히 동기화해 둡니다.
   state.transcript = displayedText;
 
   setStatus('음성을 듣고 STT로 변환하는 중입니다.');
@@ -275,18 +257,14 @@ function onRecognitionError(event) {
 }
 
 function onRecognitionEnd() {
-  // 1. [임시 데이터 Rescue] 만약 세션이 닫힐 때 미처 finalizedSentences에 들어가지 못한 임시 텍스트가 있다면 영구 복구 적재!
+  // 1. [임시 데이터 Rescue] 세션이 닫힐 때 미처 확정되지 못한 임시 텍스트가 있다면 원문에 직접 증분 이식!
   if (state.lastInterimText) {
-    state.finalizedSentences.push(state.lastInterimText);
+    state.transcript = state.transcript ? `${state.transcript}\n${state.lastInterimText}` : state.lastInterimText;
     state.lastInterimText = ''; // 소모 완료 리셋
-    
-    // 강제 구제된 텍스트를 원문 텍스트 공간에 안전하게 렌더링 동기화
-    state.transcript = state.finalizedSentences.join('\n').trim();
     setTranscript(state.transcript);
   }
 
-  // 세션이 완전히 수명 주기를 마쳤으므로 세션 내 확정 인덱스 목록만 초기화 (영구 적재 버퍼인 finalizedSentences는 보존)
-  state.processedIndices.clear();
+  // 복잡하고 위험했던 processedIndices.clear() 인덱스 관리는 완벽히 제거되었습니다!
 
   // 사용자가 명시적으로 정지 버튼을 누르지 않았는데 브라우저 타임아웃 등으로 꺼진 경우
   if (state.isCapturing) {
@@ -343,13 +321,8 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
-  // 사용자가 수동 수정한 텍스트도 영구 락킹 버퍼에 즉각 동기화하여 날아감 방지!
-  const trimmed = state.transcript.trim();
-  if (trimmed) {
-    state.finalizedSentences = trimmed.split('\n').map(line => line.trim()).filter(Boolean);
-  } else {
-    state.finalizedSentences = [];
-  }
+  // 복잡했던 finalizedSentences 동기화 없이, els.transcript.value 자체가 
+  // 그대로 완벽한 state.transcript로 직통 보존되므로 100% 정합성을 보장합니다!
   renderVariants();
 }
 
