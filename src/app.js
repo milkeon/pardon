@@ -97,7 +97,7 @@ function stopCapture() {
   state.readyForVariants = true;
   renderVariants();
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 음성 보정본, 맥락 보정본, 종합본을 만들었습니다.');
+  setStatus('녹음을 종료했습니다. 보수 복원본, 균형 복원본, 정리 복원본을 만들었습니다.');
 }
 
 function clearAll() {
@@ -185,7 +185,7 @@ function onTranscriptEdit() {
 }
 
 function renderVariants() {
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  const transcript = els.transcript.value || state.transcript;
 
   if (!state.readyForVariants || !transcript) {
     state.variants = [];
@@ -193,7 +193,7 @@ function renderVariants() {
     els.emptyState.hidden = false;
     els.emptyState.textContent = state.readyForVariants
       ? '원문이 비어 있어서 가능성을 만들 수 없습니다.'
-      : '정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.';
+      : '정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.';
     return;
   }
 
@@ -258,7 +258,7 @@ function buildVariantComparison(sourceText, variantText) {
 }
 
 function tokenizeForDiff(value) {
-  return normalizeWhitespace(value).split(' ').filter(Boolean);
+  return String(value ?? '').split(/\s+/).filter(Boolean);
 }
 
 function markChangedTokens(sourceTokens, variantTokens) {

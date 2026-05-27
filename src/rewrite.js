@@ -124,117 +124,115 @@ export function inferContextHints(text) {
 }
 
 export function buildRewriteVariants(text) {
-  const cleanedText = normalizeWhitespace(text);
+  const rawText = String(text ?? '');
+  const cleanedText = normalizeWhitespace(rawText);
   if (!cleanedText) {
     return [
       {
         id: 'possibility-1',
-        label: '가능성 1 · 음성 보정본',
-        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
+        label: '가능성 1 · 보수 복원본',
+        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
       },
       {
         id: 'possibility-2',
-        label: '가능성 2 · 맥락 보정본',
-        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
+        label: '가능성 2 · 균형 복원본',
+        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
       },
       {
         id: 'possibility-3',
-        label: '가능성 3 · 종합본',
-        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
+        label: '가능성 3 · 정리 복원본',
+        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
       }
     ];
   }
 
-  const profile = deriveContextProfile(cleanedText);
-  const phonetic = buildPhoneticVariant(cleanedText);
-  const contextual = buildContextVariant(cleanedText, profile);
-  const combined = buildCombinedVariant(cleanedText, profile, phonetic, contextual);
+  const profile = deriveContextProfile(rawText);
+  const phonetic = buildPhoneticVariant(rawText);
+  const balanced = buildContextVariant(rawText, profile);
+  const organized = buildCombinedVariant(rawText, profile, phonetic, balanced);
 
   return [
     {
       id: 'possibility-1',
-      label: '가능성 1 · 음성 보정본',
+      label: '가능성 1 · 보수 복원본',
       text: phonetic
     },
     {
       id: 'possibility-2',
-      label: '가능성 2 · 맥락 보정본',
-      text: contextual
+      label: '가능성 2 · 균형 복원본',
+      text: balanced
     },
     {
       id: 'possibility-3',
-      label: '가능성 3 · 종합본',
-      text: combined
+      label: '가능성 3 · 정리 복원본',
+      text: organized
     }
   ];
 }
 
 function buildPhoneticVariant(text) {
-  const lines = normalizeWhitespace(text)
-    .split(/(?<=[.!?])\s+/)
+  const clauses = splitTranscriptClauses(text);
+  const sourceClauses = clauses.length ? clauses : [normalizeWhitespace(text)];
+  const lines = sourceClauses
     .filter(Boolean)
     .map((line) => applyPhoneticFixes(line));
 
-  const joined = lines.join(' ').replace(/\s+([,.!?;:])/g, '$1');
+  const joined = lines.join(' ')
+    .replace(/\s+([,.!?;:])/g, '$1');
+
   return ensureSentenceEnding(normalizeWhitespace(joined));
 }
 
 function buildContextVariant(text, profile) {
-  const base = buildPhoneticVariant(text);
   const structure = analyzeTranscriptStructure(text, profile);
+  const clauses = splitTranscriptClauses(text);
+  const sourceClauses = clauses.length ? clauses : [normalizeWhitespace(text)];
+  const cleanedClauses = dedupeClauses(
+    sourceClauses
+      .map((clause) => applyTranscriptCorrections(cleanSpokenKorean(applyPhoneticFixes(clause))))
+      .filter(Boolean)
+  );
 
-  if (looksLikeConversation(text)) {
-    return buildDialogueVariant(text, profile, structure);
+  if (!cleanedClauses.length) {
+    return buildPhoneticVariant(text);
   }
 
-  if (profile.intent === 'question') {
-    return buildQuestionVariant(base);
+  if (cleanedClauses.length === 1) {
+    return ensureSentenceEnding(normalizeWhitespace(cleanedClauses[0]));
   }
 
-  if (profile.intent === 'apology') {
-    return buildApologyVariant(base);
-  }
+  const selectedClauses = cleanedClauses.length > 4
+    ? selectVariantClauses(cleanedClauses, profile, structure, 4)
+    : cleanedClauses;
 
-  if (profile.intent === 'update' || profile.channel === 'report') {
-    return buildUpdateVariant(base);
-  }
-
-  if (profile.intent === 'action') {
-    return buildActionVariant(base);
-  }
-
-  if (profile.tone === 'formal' || profile.tone === 'apologetic') {
-    return buildPoliteVariant(base);
-  }
-
-  if (profile.mlFocus.label === 'summary') {
-    return buildSummaryVariant(base, profile, structure);
-  }
-
-  if (structure.shouldSummarize) {
-    return buildSummaryVariant(base, profile, structure);
-  }
-
-  return buildDialogueVariant(base, profile, structure);
+  return ensureSentenceEnding(normalizeWhitespace(selectedClauses.join(' ')));
 }
 
 function buildCombinedVariant(text, profile, phonetic, contextual) {
-  if (profile.intent === 'action') {
-    return buildCombinedActionVariant(phonetic);
+  const structure = analyzeTranscriptStructure(text, profile);
+  const clauses = splitTranscriptClauses(text);
+  const sourceClauses = clauses.length ? clauses : [contextual || phonetic || normalizeWhitespace(text)];
+  const cleanedClauses = dedupeClauses(
+    sourceClauses
+      .map((clause) => applyContextCorrections(applyTranscriptCorrections(cleanSpokenKorean(applyPhoneticFixes(clause)))))
+      .filter(Boolean)
+  );
+
+  if (!cleanedClauses.length) {
+    return contextual || phonetic || ensureSentenceEnding(normalizeWhitespace(text));
   }
 
-  if (profile.intent === 'question') {
-    return buildQuestionVariant(phonetic);
+  if (cleanedClauses.length === 1) {
+    return ensureSentenceEnding(normalizeWhitespace(cleanedClauses[0]));
   }
 
-  if (profile.intent === 'apology') {
-    return buildApologyVariant(phonetic);
-  }
+  const selectedClauses = cleanedClauses.length > 4
+    ? selectVariantClauses(cleanedClauses, profile, structure, 4)
+    : cleanedClauses;
 
-  const polished = buildSummaryVariant(contextual || phonetic || text, profile, analyzeTranscriptStructure(text, profile));
-  if (polished !== contextual) return polished;
-  if (contextual !== phonetic) return contextual;
-  return ensureSentenceEnding(normalizeWhitespace(text));
+  const merged = normalizeWhitespace(selectedClauses.join(' '));
+  if (!merged) return contextual || phonetic || ensureSentenceEnding(normalizeWhitespace(text));
+  return ensureSentenceEnding(merged);
 }
 
 function buildDialogueVariant(text, profile, structure = analyzeTranscriptStructure(text, profile)) {
@@ -280,7 +278,7 @@ function buildSummaryVariant(text, profile = deriveContextProfile(text), structu
 
   const opener = chooseVariantOpener(profile, structure, 'summary');
   const joined = stitchClauses(fragments, 'summary');
-  return ensureSentenceEnding(normalizeWhitespace(`${opener}, ${joined}`));
+  return ensureSentenceEnding(normalizeWhitespace(opener ? `${opener}, ${joined}` : joined));
 }
 
 function polishForDelivery(text) {
@@ -492,32 +490,24 @@ function chooseVariantOpener(profile, structure, mode) {
     if (label === 'action') return '실행 관점에서 정리하면';
     if (label === 'apology') return '죄송하지만 정리하면';
     if (label === 'polite') return '말씀드리면';
-    if (structure.shouldSummarize) return '정리하면';
-    return '핵심은';
+    if (structure.shouldSummarize) return '';
+    return '';
   }
 
   if (label === 'question') return '즉';
   if (label === 'action') return '해야 할 일은';
   if (label === 'apology') return '죄송하지만';
-  if (label === 'summary') return '쉽게 말하면';
+  if (label === 'summary') return '';
   if (profile.tone === 'formal') return '말씀드리면';
-  return '정리해 보면';
+  return '';
 }
 
 function stitchClauses(clauses, mode) {
   if (!clauses.length) return '';
   if (clauses.length === 1) return clauses[0];
 
-  const connectors = mode === 'summary'
-    ? ['', ' 그리고', ' 다만', ' 또한']
-    : ['', ' 그리고', ' 그런데', ' 그래서'];
-
   return clauses
-    .map((clause, index) => {
-      if (index === 0) return clause;
-      const connector = connectors[(index - 1) % connectors.length] || ' 그리고';
-      return `${connector} ${stripLeadingConnector(clause)}`.trim();
-    })
+    .map((clause) => stripLeadingConnector(clause))
     .join(' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.!?;:])/g, '$1')
