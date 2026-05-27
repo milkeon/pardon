@@ -218,6 +218,7 @@ async function transcribeAudioWithServer(audioBlob) {
 
 function onRecognitionResult(event) {
   let interimText = '';
+  let hasNewFinal = false; // 이번 이벤트에서 새로운 확정 문장이 추가되었는지 감지하는 플래그
 
   // event.results의 처음(0)부터 루프를 돌며, 새롭게 도출된 확정 및 임시 문자열 추출
   for (let i = 0; i < event.results.length; i += 1) {
@@ -229,6 +230,7 @@ function onRecognitionResult(event) {
       if (!state.processedIndices.has(i)) {
         state.finalizedSentences.push(segment);
         state.processedIndices.add(i);
+        hasNewFinal = true;
       }
     } else {
       // 임시로 흘러가는 실시간 말소리 수집
@@ -236,20 +238,30 @@ function onRecognitionResult(event) {
     }
   }
 
-  // 영구 보존된 확정 문장들과 임시 문장을 안전하게 결합
+  // 새로운 최종 확정 문장이 고정 버퍼에 영구 안착했다면,
+  // 중복 기입을 차단하기 위해 임시 백업 버퍼를 스마트하게 리셋합니다.
+  if (hasNewFinal) {
+    state.lastInterimText = '';
+  }
+
   const baseText = state.finalizedSentences.join('\n').trim();
   const cleanedInterim = interimText.trim();
   
-  // 임시 단어가 죽기 전에 낚아챌 수 있도록 실시간 버퍼에 백업해둡니다!
-  state.lastInterimText = cleanedInterim;
+  // [지워짐 방지 워터마크 밸브]
+  // 브라우저가 음성을 다듬거나 버그로 인해 이전 이벤트보다 짧거나 텅 빈 임시 문자열을 보낼 경우
+  // 이전에 캡처에 성공했던 최장 길이 임시 텍스트(lastInterimText)를 악착같이 지켜내고 덮어쓰지 않습니다!
+  if (cleanedInterim.length >= state.lastInterimText.length) {
+    state.lastInterimText = cleanedInterim;
+  }
   
-  const displayedText = baseText + (cleanedInterim ? (baseText ? `\n${cleanedInterim}` : cleanedInterim) : '');
+  // 화면 및 원문에 노출할 때는 항상 보증된 최장 임시 텍스트를 결합하여 단어 춤춤/휘발 현상을 원천 방지합니다.
+  const displayedText = baseText + (state.lastInterimText ? (baseText ? `\n${state.lastInterimText}` : state.lastInterimText) : '');
 
   // textarea 화면 원문 업데이트
   setTranscript(displayedText);
   
-  // 실시간 변환 갱신용으로 state.transcript 동기화
-  state.transcript = baseText;
+  // [실시간 풀-동기화] 현재 노출된 안전 최장 텍스트 전체를 항상 원문에 즉시 박제해둡니다!
+  state.transcript = displayedText;
 
   setStatus('음성을 듣고 STT로 변환하는 중입니다.');
 }
