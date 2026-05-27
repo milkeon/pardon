@@ -19,6 +19,7 @@
           <button class="button button--primary" data-action="start-recording">녹음 시작</button>
           <button class="button" data-action="stop-recording" disabled>정지</button>
           <button class="button" data-action="clear">초기화</button>
+          <button class="button button--primary" data-action="generate">변환</button>
           <button class="button button--ghost" data-action="copy">선택한 문장 복사</button>
         </div>
         <p class="support-line" id="support-status"></p>
@@ -43,7 +44,6 @@
         <article class="panel">
           <div class="panel__header">
             <h2>가능성 3가지</h2>
-            <button class="button button--small" data-action="generate">다시 생성</button>
           </div>
           <div class="variant-guide">
             <p class="variant-guide__title">차이 읽는 법</p>
@@ -55,11 +55,13 @@
             </ul>
           </div>
           <div id="variants-empty" class="empty-state" hidden>
-            정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.
+            정지하면 변환 버튼으로 3가지 결과를 만들 수 있습니다.
           </div>
           <div id="variant-list" class="variant-list" aria-live="polite"></div>
         </article>
       </section>
     </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden>복사되었습니다</div>
   </body>
 </html>

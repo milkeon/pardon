@@ -12,7 +12,8 @@ const els = {
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   variantList: document.querySelector('#variant-list'),
-  emptyState: document.querySelector('#variants-empty')
+  emptyState: document.querySelector('#variants-empty'),
+  toast: document.querySelector('#toast')
 };
 
 const state = {
@@ -26,7 +27,8 @@ const state = {
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
-  readyForVariants: false
+  readyForVariants: false,
+  toastTimer: null
 };
 
 initialize();
@@ -95,9 +97,10 @@ function stopCapture() {
   }
 
   state.readyForVariants = true;
-  renderVariants();
+  state.variants = [];
+  renderVariantPlaceholder('정지했습니다. 변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 보수 복원본, 균형 복원본, 정리 복원본을 만들었습니다.');
+  setStatus('녹음을 종료했습니다. 이제 변환 버튼으로 3가지 가능성을 만드세요.');
 }
 
 function clearAll() {
@@ -105,7 +108,7 @@ function clearAll() {
   clearSessionState();
   setTranscript('');
   setAudioUrl('');
-  renderVariants();
+  renderVariantPlaceholder('정지하면 변환 버튼으로 3가지 결과를 만들 수 있습니다.');
   setStatus('원문, 오디오, 선택 상태를 초기화했습니다.');
 }
 
@@ -147,12 +150,7 @@ function onRecognitionResult(event) {
 
   state.recognitionSegments = merged.segments;
   state.recognitionCommittedTranscript = merged.committedTranscript;
-  state.transcript = merged.transcript;
-  setTranscript(merged.transcript);
-
-  if (state.readyForVariants) {
-    renderVariants();
-  }
+  state.transcript = syncTranscriptDisplay(merged.transcript);
 
   setStatus('음성을 듣고 STT 원문을 즉시 쌓는 중입니다.');
 }
@@ -180,26 +178,32 @@ function onTranscriptEdit() {
   state.recognitionSegments = [{ transcript: els.transcript.value, isFinal: true }];
   state.recognitionCommittedTranscript = els.transcript.value;
   if (state.readyForVariants) {
-    renderVariants();
+    state.variants = [];
+    renderVariantPlaceholder('원문이 바뀌었습니다. 변환 버튼을 다시 눌러 주세요.');
   }
 }
 
 function renderVariants() {
   const transcript = els.transcript.value || state.transcript;
 
-  if (!state.readyForVariants || !transcript) {
+  if (!state.readyForVariants) {
     state.variants = [];
-    els.variantList.innerHTML = '';
-    els.emptyState.hidden = false;
-    els.emptyState.textContent = state.readyForVariants
-      ? '원문이 비어 있어서 가능성을 만들 수 없습니다.'
-      : '정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.';
+    renderVariantPlaceholder('정지하면 변환 버튼으로 3가지 결과를 만들 수 있습니다.');
     return;
   }
 
-  const variants = buildRewriteVariants(transcript);
-  state.variants = variants;
-  renderVariantCards(variants);
+  if (!transcript) {
+    state.variants = [];
+    renderVariantPlaceholder('원문이 비어 있어서 변환할 수 없습니다.');
+    return;
+  }
+
+  if (!state.variants.length) {
+    renderVariantPlaceholder('변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
+    return;
+  }
+
+  renderVariantCards(state.variants);
 }
 
 function renderVariantCards(variants) {
@@ -227,6 +231,12 @@ function renderVariantCards(variants) {
     card.addEventListener('click', () => {
       state.selectedVariantId = variant.id;
       renderVariantCards(variants);
+      showToast('복사되었습니다');
+      copyTextToClipboard(variant.text).then((copied) => {
+        if (!copied) {
+          setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
+        }
+      });
     });
     els.variantList.appendChild(card);
   });
@@ -306,24 +316,35 @@ function markChangedTokens(sourceTokens, variantTokens) {
 
 function handleGenerateClicked() {
   state.readyForVariants = true;
-  renderVariants();
-  if (state.transcript || els.transcript.value) {
-    setStatus('현재 원문 기준으로 3가지 가능성을 다시 계산했습니다.');
-  } else {
+  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+
+  if (!transcript) {
+    state.variants = [];
+    renderVariantPlaceholder('먼저 원문이 있어야 변환할 수 있습니다.');
     setStatus('먼저 원문이 있어야 가능성을 계산할 수 있습니다.');
+    return;
   }
+
+  state.variants = buildRewriteVariants(transcript);
+  renderVariants();
+  setStatus('현재 원문 기준으로 3가지 가능성을 변환했습니다.');
 }
 
 async function copySelectedVariant() {
-  const variants = state.variants.length
-    ? state.variants
-    : buildRewriteVariants(normalizeWhitespace(els.transcript.value || state.transcript));
+  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  if (!transcript) {
+    setStatus('먼저 원문이 있어야 복사할 수 있습니다.');
+    return;
+  }
+
+  const variants = state.variants.length ? state.variants : buildRewriteVariants(transcript);
   const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
 
-  try {
-    await navigator.clipboard.writeText(selected?.text || '');
+  const copied = await copyTextToClipboard(selected?.text || '');
+  if (copied) {
+    showToast('복사되었습니다');
     setStatus('선택한 가능성을 클립보드에 복사했습니다.');
-  } catch {
+  } else {
     setStatus('이 브라우저에서는 클립보드 복사에 실패했습니다.');
   }
 }
@@ -362,7 +383,89 @@ function setStatus(message) {
 }
 
 function setTranscript(value) {
+  state.transcript = value;
   els.transcript.value = value;
+}
+
+function syncTranscriptDisplay(nextValue) {
+  const currentValue = els.transcript.value || '';
+  const targetValue = String(nextValue ?? '');
+
+  if (currentValue === targetValue) return targetValue;
+
+  const commonPrefixLength = getCommonPrefixLength(currentValue, targetValue);
+  const syncedValue = `${currentValue.slice(0, commonPrefixLength)}${targetValue.slice(commonPrefixLength)}`;
+  els.transcript.value = syncedValue;
+  return syncedValue;
+}
+
+function getCommonPrefixLength(left, right) {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+function renderVariantPlaceholder(message) {
+  state.variants = [];
+  els.variantList.innerHTML = '';
+  els.emptyState.hidden = false;
+  els.emptyState.textContent = message;
+}
+
+function copyTextToClipboard(text) {
+  if (!text) return Promise.resolve(false);
+
+  const fallbackSucceeded = fallbackCopyText(text);
+  if (fallbackSucceeded) {
+    return Promise.resolve(true);
+  }
+
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text)
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  return Promise.resolve(false);
+}
+
+function fallbackCopyText(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  }
+
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+function showToast(message) {
+  if (!els.toast) return;
+
+  window.clearTimeout(state.toastTimer);
+  els.toast.textContent = message;
+  els.toast.hidden = false;
+  els.toast.classList.add('is-visible');
+
+  state.toastTimer = window.setTimeout(() => {
+    els.toast.classList.remove('is-visible');
+    els.toast.hidden = true;
+  }, 5000);
 }
 
 function setAudioUrl(url) {
