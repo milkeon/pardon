@@ -24,7 +24,7 @@ const state = {
   chunks: [],
   transcript: '',
   interimTranscript: '',
-  selectedVariantId: 'clean',
+  selectedVariantId: 'p1',
   selectedAudioUrl: '',
   variants: [],
   isCapturing: false // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
@@ -226,7 +226,7 @@ function renderVariantCards(variants) {
   els.emptyState.hidden = normalizeWhitespace(els.transcript.value || state.transcript).length > 0;
 
   if (!variants.some((variant) => variant.id === state.selectedVariantId)) {
-    state.selectedVariantId = variants[0]?.id || 'clean';
+    state.selectedVariantId = variants[0]?.id || 'p1';
   }
 
   variants.forEach((variant) => {
@@ -322,7 +322,7 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
       messages: [
         {
           role: 'system',
-          content: '원문을 정확히 3개의 대안으로 다시 써 주세요. 키는 clean, polite, action만 허용하고, 의미를 유지하면서 사용자 맥락을 반영한 엄격한 JSON으로만 반환하세요. 설명 문구는 넣지 마세요.'
+          content: '입력된 원문 STT는 브라우저 머신러닝의 한계로 인해 오인식이나 맞춤법 오타가 있을 가능성이 높습니다. 사용자가 제공한 문맥 힌트를 기반으로, 화자가 원래 말하려고 했던 가장 유력한 3가지 문장 가능성(해석 대안)을 추정해 주세요. 키는 p1, p2, p3만 사용하며, 엄격한 JSON 형태로 반환해 주세요. 추가 설명은 넣지 마세요.'
         },
         {
           role: 'user',
@@ -342,9 +342,9 @@ async function generateRemoteVariants({ transcript, context, apiKey }) {
   const localFallback = buildRewriteVariants(transcript, context);
 
   return [
-    { id: 'clean', label: '깔끔하게', text: finalizeVariantText(parsed?.clean || '') || localFallback[0].text },
-    { id: 'polite', label: '공손하게', text: finalizeVariantText(parsed?.polite || '') || localFallback[1].text },
-    { id: 'action', label: '실행 중심', text: finalizeVariantText(parsed?.action || '') || localFallback[2].text }
+    { id: 'p1', label: '가능성 1 (가장 유력)', text: finalizeVariantText(parsed?.p1 || '') || localFallback[0].text },
+    { id: 'p2', label: '가능성 2 (유사 발음 교정)', text: finalizeVariantText(parsed?.p2 || '') || localFallback[1].text },
+    { id: 'p3', label: '가능성 3 (문맥 의도 보정)', text: finalizeVariantText(parsed?.p3 || '') || localFallback[2].text }
   ];
 }
 

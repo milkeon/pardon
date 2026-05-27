@@ -8,8 +8,8 @@ test('normalizeWhitespace는 과도한 공백을 정리한다', () => {
 
 test('inferContextHints는 문맥 키워드에 반응한다', () => {
   const hints = inferContextHints('Please rewrite this as a polite email for a customer');
-  assert.ok(hints.includes('professional'));
-  assert.ok(hints.includes('polished'));
+  assert.ok(hints.includes('공식 이메일 서식'));
+  assert.ok(hints.includes('정중함'));
 });
 
 test('buildRewriteVariants는 선택 가능한 3개 변형을 반환한다', () => {
@@ -17,7 +17,7 @@ test('buildRewriteVariants는 선택 가능한 3개 변형을 반환한다', () 
   assert.equal(variants.length, 3);
   assert.deepEqual(
     variants.map((variant) => variant.id),
-    ['clean', 'polite', 'action']
+    ['p1', 'p2', 'p3']
   );
   assert.ok(variants.every((variant) => typeof variant.text === 'string' && variant.text.length > 0));
 });
