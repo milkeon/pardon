@@ -12,9 +12,7 @@ const els = {
   supportStatus: document.querySelector('#support-status'),
   recordingBadge: document.querySelector('#recording-badge'),
   variantList: document.querySelector('#variant-list'),
-  emptyState: document.querySelector('#variants-empty'),
-  contextHint: document.querySelector('#context-hint'),
-  apiWarningBanner: document.querySelector('#api-warning-banner')
+  emptyState: document.querySelector('#variants-empty')
 };
 
 const state = {
@@ -38,11 +36,6 @@ function initialize() {
   updateSupportStatus();
   renderVariants();
   wireEvents();
-
-  // [사용자 규칙] 인풋이 활성화되면 항상 기본으로 커서가 잡히도록 포커싱을 부여합니다!
-  if (els.contextHint) {
-    els.contextHint.focus();
-  }
 }
 
 function wireEvents() {
@@ -52,16 +45,6 @@ function wireEvents() {
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
   els.transcript.addEventListener('input', onTranscriptEdit);
-
-  // [사용자 규칙] 인풋은 엔터 누르면 확인/저장(다시 분석) 버튼이 항상 연동되도록 이벤트 리스너 바인딩!
-  if (els.contextHint) {
-    els.contextHint.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleGenerateClicked();
-      }
-    });
-  }
 }
 
 async function startCapture() {
@@ -208,13 +191,11 @@ function onRecorderStop() {
     .then((remoteVariants) => {
       state.variants = remoteVariants;
       renderVariantCards(remoteVariants);
-      if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
       setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
     })
     .catch((err) => {
       console.error('서버 머신러닝 분석 실패:', err);
       setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
-      if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
       renderVariants(); // 실패 시 로컬 엔진 폴백
     });
 }
@@ -345,13 +326,11 @@ function onRecognitionEnd() {
         .then((remoteVariants) => {
           state.variants = remoteVariants;
           renderVariantCards(remoteVariants);
-          if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
           setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
         })
         .catch((err) => {
           console.error('서버 머신러닝 분석 실패:', err);
           setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
-          if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
           renderVariants();
         });
     } else {
@@ -422,12 +401,10 @@ async function handleGenerateClicked() {
     const remoteVariants = await generateServerVariants(transcript);
     state.variants = remoteVariants;
     renderVariantCards(remoteVariants);
-    if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'none';
     setStatus('OpenAI로 머신러닝 분석을 완료했습니다.');
   } catch (error) {
     state.variants = buildRewriteVariants(transcript);
     renderVariantCards(state.variants);
-    if (els.apiWarningBanner) els.apiWarningBanner.style.display = 'block';
     setStatus(`원격 분석에 실패해서 로컬 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
   } finally {
     els.generateButton.disabled = false;
@@ -435,11 +412,10 @@ async function handleGenerateClicked() {
 }
 
 async function generateServerVariants(transcript) {
-  const hint = els.contextHint ? els.contextHint.value.trim() : '';
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transcript, hint })
+    body: JSON.stringify({ transcript })
   });
 
   if (!response.ok) {
