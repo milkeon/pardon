@@ -176,24 +176,18 @@ function onRecorderStop() {
   const audioUrl = URL.createObjectURL(blob);
   setAudioUrl(audioUrl);
 
-  // 번거로운 브라우저 API 키 요구 및 설정 없이 켜자마자 바로 백엔드 초정밀 머신러닝 분석을 연동합니다!
-  setStatus('세계 최고의 음성 모델 OpenAI Whisper로 음성을 초정밀 분석하는 중입니다...');
+  // [원문 보존 철칙] 브라우저 실시간 STT로 받아적은 원시 텍스트가 진짜 "원문"이므로, 
+  // 원격 Whisper STT 결과를 덮어씌워 원본을 훼손하지 않고 그대로 보존합니다!
+  setStatus('녹음 오디오 저장을 완료했습니다. 원문 그대로를 기반으로 3가지 해석 대안을 생성합니다...');
   
-  transcribeAudioWithServer(blob)
-    .then((whisperResult) => {
-      // Whisper의 정밀 결과 역시 싹 다 뭉개지 않고 영구 상속 누적시킵니다!
-      const current = state.transcript.trim();
-      const finalWhisper = current ? `${current}\n${whisperResult.trim()}` : whisperResult.trim();
-      
-      state.transcript = finalWhisper;
-      setTranscript(finalWhisper);
-      
-      // Whisper가 덧붙여준 새로운 최종 보존을 락킹 버퍼에 다시 동기화
-      state.finalizedSentences = finalWhisper.split('\n').map(line => line.trim()).filter(Boolean);
-      
-      setStatus('Whisper 분석 완료! GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
-      return generateServerVariants(finalWhisper);
-    })
+  const finalTranscript = state.transcript.trim();
+  if (!finalTranscript) {
+    setStatus('원문이 비어 있어 분석 카드를 생성할 수 없습니다.');
+    renderVariants();
+    return;
+  }
+
+  generateServerVariants(finalTranscript)
     .then((remoteVariants) => {
       state.variants = remoteVariants;
       renderVariantCards(remoteVariants);
@@ -311,12 +305,28 @@ function onRecognitionEnd() {
     } catch {
       // ignore
     }
+  } else {
+    // 녹음기(MediaRecorder)가 미가동 상태인 경우, 여기서 직접 실시간 원문 기반 원격 분석 카드를 갱신합니다!
+    const finalTranscript = state.transcript.trim();
+    if (finalTranscript) {
+      setStatus('전체 원문 맥락을 기반으로 3가지 가능성을 분석하는 중입니다...');
+      generateServerVariants(finalTranscript)
+        .then((remoteVariants) => {
+          state.variants = remoteVariants;
+          renderVariantCards(remoteVariants);
+          setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
+        })
+        .catch((err) => {
+          console.error('서버 머신러닝 분석 실패:', err);
+          setStatus(`원격 머신러닝 분석에 실패하여 로컬 대체 엔진을 사용합니다: ${friendlyError(err)}`);
+          renderVariants();
+        });
+    } else {
+      renderVariants();
+    }
   }
 
   setRecording(false);
-  
-  // [피날레 갱신] 녹음/음성 인식이 완벽히 막을 내린 이 최후의 순간에 전체 완성형 맥락을 기반으로 3가지 가능성을 '단 한번' 기품있게 갱신합니다!
-  renderVariants();
 }
 
 function onTranscriptEdit() {
