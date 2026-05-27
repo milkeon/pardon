@@ -1,5 +1,8 @@
 # Pardon
 
+#배포
+https://milkeon.github.io/pardon/
+
 Pardon은 브라우저에서 오디오를 녹음하고, STT 원문을 보여주며, 그 원문을 바탕으로 3개의 재작성안을 선택할 수 있게 해주는 정적 웹앱입니다.
 
 ## 주요 기능
