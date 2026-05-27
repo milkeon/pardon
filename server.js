@@ -32,7 +32,7 @@ function resolvePath(urlPath) {
     .replace(/^([.]{2}[\/\\])+/, '')
     .replace(/^\//, '');
   const resolved = path.resolve(root, safeRelative || 'index.html');
-  return resolved.startsWith(root) ? resolved : null;
+  return resolved.toLowerCase().startsWith(root.toLowerCase()) ? resolved : null;
 }
 
 async function pickAsset(urlPath) {
