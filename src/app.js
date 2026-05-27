@@ -142,7 +142,59 @@ function onChunk(event) {
 
 function onRecorderStop() {
   const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || 'audio/webm' });
-  setAudioUrl(URL.createObjectURL(blob));
+  const audioUrl = URL.createObjectURL(blob);
+  setAudioUrl(audioUrl);
+
+  // API 키가 존재하면, 엉터리 브라우저 STT를 전면 생략하고 세계 최고 수준의 Whisper STT 모델로 분석합니다!
+  const apiKey = normalizeWhitespace(els.apiKey.value);
+  if (apiKey) {
+    setStatus('세계 최고의 음성 모델 OpenAI Whisper로 음성을 초정밀 분석하는 중입니다...');
+    transcribeAudioWithWhisper(blob, apiKey)
+      .then((whisperResult) => {
+        state.transcript = whisperResult;
+        setTranscript(whisperResult);
+        
+        setStatus('Whisper 분석 완료! GPT가 3가지 해석 가능성으로 문맥을 최종 조립합니다...');
+        return generateRemoteVariants({ transcript: whisperResult, apiKey });
+      })
+      .then((remoteVariants) => {
+        state.variants = remoteVariants;
+        renderVariantCards(remoteVariants);
+        setStatus('머신러닝이 전체 맥락을 유기적으로 분석해 3가지 가능성을 복원했습니다!');
+      })
+      .catch((err) => {
+        console.error('Whisper/GPT 분석 실패:', err);
+        setStatus(`원격 머신러닝 분석에 실패했습니다: ${friendlyError(err)}`);
+        renderVariants(); // 실패 시 로컬 폴백 작동
+      });
+  } else {
+    // API 키가 없는 로컬 데모에서는 기존처럼 브라우저 STT 결과를 바탕으로 정적 해석 대안 노출
+    renderVariants();
+  }
+}
+
+async function transcribeAudioWithWhisper(audioBlob, apiKey) {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'recording.webm');
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'ko');
+  // 개발용 IT 힌트를 Whisper에게 제공하여 전문 단어 인식률을 극한으로 상향
+  formData.append('prompt', 'SQLD, ADsP, 블로그, API, Git, commit, Docker, Database, 포트, 서버, 깃 커밋');
+
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(`Whisper STT 분석 실패 (${response.status})`);
+  }
+
+  const data = await response.json();
+  return data.text || '';
 }
 
 function onRecognitionResult(event) {
