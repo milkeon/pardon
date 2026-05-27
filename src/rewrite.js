@@ -31,6 +31,12 @@ const PHONETIC_REPLACEMENTS = [
   [/\b뭐였더라\b/g, '']
 ];
 
+const TRANSCRIPT_STOPWORDS = new Set([
+  '그리고', '그런데', '그래서', '다만', '하지만', '또', '즉', '결국', '왜냐하면', '시간상', '아무튼', '아까처럼',
+  '그', '이', '저', '것', '거', '수', '등', '좀', '약간', '그냥', '조금', '대충', '진짜', '사실', '정말', '아주',
+  '아마', '거의', '이미', '이제', '다시', '처음', '현재', '상황', '내용', '부분', '문장', '말', '것들', '여기', '저기'
+]);
+
 export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -175,9 +181,10 @@ function buildPhoneticVariant(text) {
 
 function buildContextVariant(text, profile) {
   const base = buildPhoneticVariant(text);
+  const structure = analyzeTranscriptStructure(text, profile);
 
   if (looksLikeConversation(text)) {
-    return buildDialogueVariant(text, profile);
+    return buildDialogueVariant(text, profile, structure);
   }
 
   if (profile.intent === 'question') {
@@ -201,10 +208,14 @@ function buildContextVariant(text, profile) {
   }
 
   if (profile.mlFocus.label === 'summary') {
-    return buildUpdateVariant(base);
+    return buildSummaryVariant(base, profile, structure);
   }
 
-  return buildDialogueVariant(base, profile);
+  if (structure.shouldSummarize) {
+    return buildSummaryVariant(base, profile, structure);
+  }
+
+  return buildDialogueVariant(base, profile, structure);
 }
 
 function buildCombinedVariant(text, profile, phonetic, contextual) {
@@ -220,19 +231,24 @@ function buildCombinedVariant(text, profile, phonetic, contextual) {
     return buildApologyVariant(phonetic);
   }
 
-  const polished = buildSummaryVariant(contextual || phonetic || text);
+  const polished = buildSummaryVariant(contextual || phonetic || text, profile, analyzeTranscriptStructure(text, profile));
   if (polished !== contextual) return polished;
   if (contextual !== phonetic) return contextual;
   return ensureSentenceEnding(normalizeWhitespace(text));
 }
 
-function buildDialogueVariant(text, profile) {
+function buildDialogueVariant(text, profile, structure = analyzeTranscriptStructure(text, profile)) {
   const base = normalizeWhitespace(text);
-  const cleaned = cleanSpokenKorean(base);
-  const sentences = splitForSpeech(cleaned);
-  const rewritten = sentences.map((sentence, index) => rewriteAsDialogue(sentence, profile, index)).filter(Boolean);
-  const joined = rewritten.join(' ');
-  return ensureSentenceEnding(normalizeWhitespace(joined));
+  const cleaned = applyTranscriptCorrections(cleanSpokenKorean(base));
+  const fragments = extractSalientFragments(cleaned, profile, structure, 2);
+
+  if (!fragments.length) {
+    return ensureSentenceEnding(normalizeWhitespace(cleaned));
+  }
+
+  const opener = chooseVariantOpener(profile, structure, 'dialogue');
+  const joined = stitchClauses(fragments, 'dialogue');
+  return ensureSentenceEnding(normalizeWhitespace(`${opener} ${joined}`));
 }
 
 function buildPoliteVariant(text) {
@@ -254,35 +270,17 @@ function looksLikeConversation(text) {
   return cues.some((pattern) => pattern.test(source)) || source.length > 40;
 }
 
-function buildSummaryVariant(text) {
-  const cleaned = cleanSpokenKorean(text);
-  const pieces = [];
+function buildSummaryVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {
+  const cleaned = applyTranscriptCorrections(cleanSpokenKorean(text));
+  const fragments = extractSalientFragments(cleaned, profile, structure, 3);
 
-  if (/(알고리즘|모델)/i.test(cleaned)) {
-    pieces.push('알고리즘이나 모델을 사용하신 거죠?');
+  if (!fragments.length) {
+    return polishForDelivery(cleaned);
   }
 
-  if (/(수준|정해져|구조)/i.test(cleaned)) {
-    pieces.push('그 구조를 받아서 어느 정도 수준인지 확인할 수 있습니다.');
-  }
-
-  if (/(처음|흐름|알면|충분)/i.test(cleaned)) {
-    pieces.push('처음 하시는 분들도 흐름만 알면 충분히 따라올 수 있습니다.');
-  }
-
-  if (/(난이도|시간상)/i.test(cleaned)) {
-    pieces.push('난이도를 여러 단계로 나눠 설명하고 싶었지만 시간상 다 다루지는 못했습니다.');
-  }
-
-  if (/(괜찮)/i.test(cleaned) && pieces.length < 4) {
-    pieces.push('괜찮습니다.');
-  }
-
-  if (pieces.length >= 2) {
-    return ensureSentenceEnding(`정리하면, ${pieces.join(' ')}`);
-  }
-
-  return polishForDelivery(cleaned);
+  const opener = chooseVariantOpener(profile, structure, 'summary');
+  const joined = stitchClauses(fragments, 'summary');
+  return ensureSentenceEnding(normalizeWhitespace(`${opener}, ${joined}`));
 }
 
 function polishForDelivery(text) {
@@ -304,6 +302,13 @@ function cleanSpokenKorean(text) {
     .replace(/시간상은/g, '시간상')
     .replace(/거 같아/g, '것 같아요')
     .replace(/여려 개/g, '여러 개')
+    .replace(/상황으로 인지하고/g, '상황을 인지하고')
+    .replace(/데이터가 부족해 가지고/g, '데이터가 부족해서')
+    .replace(/부족해셔/g, '부족해서')
+    .replace(/자연 처리/g, '자연어 처리')
+    .replace(/구체적으로 해야 돼/g, '구체적으로 해야 합니다')
+    .replace(/구체적으로 해야돼/g, '구체적으로 해야 합니다')
+    .replace(/명확하게 해야 돼/g, '명확하게 해야 합니다')
     .replace(/퍼스/g, 'first')
     .replace(/g8/g, 'G8')
     .replace(/\s+/g, ' ')
@@ -311,49 +316,43 @@ function cleanSpokenKorean(text) {
     .trim();
 }
 
-function splitForSpeech(text) {
+function splitTranscriptClauses(text) {
   return normalizeWhitespace(text)
-    .split(/(?<=[.!?])\s+|\s+(?=근데|그리고|그래서|다만|아까처럼|시간상|근데요|그리고요)/)
+    .replace(/([.!?])/g, '$1|')
+    .replace(/\s+(근데|그리고|그래서|다만|하지만|그런데|또|즉|결국|왜냐하면|시간상|아무튼|아까처럼)\s+/g, '|$1 ')
+    .split('|')
     .map((sentence) => sentence.trim())
     .filter(Boolean);
 }
 
-function rewriteAsDialogue(sentence, profile, index) {
-  const current = normalizeWhitespace(sentence);
-  if (!current) return '';
+function analyzeTranscriptStructure(text, profile) {
+  const cleaned = applyTranscriptCorrections(cleanSpokenKorean(text));
+  const clauses = splitTranscriptClauses(cleaned);
+  const signatures = new Set();
+  let repeatedClauses = 0;
 
-  if (index === 0 && !/[!?]$/.test(current)) {
-    const openers = ['결론적으로', '정리하면', '말씀드리면'];
-    if (profile.intent === 'summary') return `${openers[1]} ${current}`;
+  for (const clause of clauses) {
+    const signature = buildClauseSignature(clause);
+    if (!signature) continue;
+    if (signatures.has(signature)) {
+      repeatedClauses += 1;
+    } else {
+      signatures.add(signature);
+    }
   }
 
-  const replacements = [
-    [/사용하신 거죠/gi, '사용하신 거죠?'],
-    [/어느 정도 되나요/gi, '어느 정도인지 궁금합니다'],
-    [/처음 하는 사람들/gi, '처음 하시는 분들'],
-    [/말이 어떻게 움직이는지/gi, '말의 흐름이 어떻게 움직이는지'],
-    [/충분히 있다는 거거든요/gi, '충분히 따라올 수 있다는 뜻입니다'],
-    [/시간상 못 했던 것 같아요/gi, '시간상 다 다루지는 못했어요'],
-    [/괜찮아요/gi, '괜찮습니다'],
-    [/그런 구조가 다 정해져 있어 가지고/gi, '그런 구조가 미리 정해져 있어서'],
-    [/다음 약간 그런 구조가/gi, '다음에는 그런 구조가']
-  ];
+  const fillerCount = (cleaned.match(/\b(어|음|그|저|그러니까|뭐지|뭐였더라|좀|약간|그냥)\b/g) || []).length;
+  const longForm = cleaned.length > 60 || clauses.length > 2;
+  const shouldSummarize = longForm && (repeatedClauses > 0 || fillerCount > 0 || profile.mlFocus.label === 'summary' || profile.mlFocus.confidence < 0.6);
 
-  let result = current;
-  for (const [pattern, replacement] of replacements) {
-    result = result.replace(pattern, replacement);
-  }
-
-  result = result
-    .replace(/\s+/g, ' ')
-    .replace(/\s+([,.!?;:])/g, '$1')
-    .trim();
-
-  if (!/[.!?]$/.test(result)) {
-    result = `${result}.`;
-  }
-
-  return result;
+  return {
+    cleaned,
+    clauses,
+    longForm,
+    repeatedClauses,
+    fillerCount,
+    shouldSummarize
+  };
 }
 
 function tightenSentence(sentence) {
@@ -381,6 +380,165 @@ function mergeShortSentences(sentences) {
     }
   }
   return merged;
+}
+
+function selectVariantClauses(clauses, profile, structure, maxClauses) {
+  const cleanedClauses = dedupeClauses(clauses.map((clause) => applyContextCorrections(cleanSpokenKorean(clause))).filter(Boolean));
+  if (cleanedClauses.length <= maxClauses) return cleanedClauses;
+
+  const scored = cleanedClauses.map((clause, index) => ({
+    clause,
+    index,
+    score: scoreClause(clause, profile, structure)
+  }));
+
+  const chosen = scored
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, maxClauses)
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.clause);
+
+  return chosen.length ? chosen : cleanedClauses.slice(0, maxClauses);
+}
+
+function extractSalientFragments(text, profile, structure, maxFragments) {
+  const clauses = structure.clauses.length ? structure.clauses : splitTranscriptClauses(text);
+  const selectedClauses = selectVariantClauses(clauses, profile, structure, maxFragments);
+  if (selectedClauses.length > 1 || !structure.longForm) {
+    return selectedClauses;
+  }
+
+  const tokens = normalizeWhitespace(text).split(' ').filter(Boolean);
+  if (tokens.length <= 6) return selectedClauses.length ? selectedClauses : [tightenSentence(text)];
+
+  const windowSize = Math.max(6, Math.min(12, Math.ceil(tokens.length / 4)));
+  const windows = [];
+
+  for (let index = 0; index <= tokens.length - windowSize; index += 1) {
+    const slice = tokens.slice(index, index + windowSize);
+    const fragment = tightenSentence(slice.join(' '));
+    if (!fragment) continue;
+
+    windows.push({
+      fragment,
+      index,
+      score: scoreFragment(fragment, profile, structure)
+    });
+  }
+
+  const chosen = windows
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .filter((window, index, list) => {
+      const overlap = list.slice(0, index).some((other) => Math.abs(other.index - window.index) < windowSize / 2);
+      return !overlap;
+    })
+    .slice(0, maxFragments)
+    .sort((left, right) => left.index - right.index)
+    .map((window) => window.fragment);
+
+  return chosen.length ? chosen : selectedClauses.length ? selectedClauses : [tightenSentence(text)];
+}
+
+function dedupeClauses(clauses) {
+  const seen = new Set();
+  const result = [];
+
+  for (const clause of clauses) {
+    const signature = buildClauseSignature(clause);
+    if (!signature || seen.has(signature)) continue;
+    seen.add(signature);
+    result.push(tightenSentence(clause));
+  }
+
+  return result;
+}
+
+function buildClauseSignature(clause) {
+  return normalizeWhitespace(clause)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(' ')
+    .filter((token) => token.length > 1 && !TRANSCRIPT_STOPWORDS.has(token))
+    .join(' ');
+}
+
+function scoreClause(clause, profile, structure) {
+  const lowered = normalizeWhitespace(clause).toLowerCase();
+  const tokens = lowered.split(/\s+/).filter(Boolean);
+  const contentTokens = tokens.filter((token) => token.length > 1 && !TRANSCRIPT_STOPWORDS.has(token));
+  let score = contentTokens.length * 2;
+
+  if (profile.intent === 'summary' && /(정리|요약|핵심|데이터|부족|문맥|상황|원인|결과|흐름)/i.test(lowered)) score += 6;
+  if (profile.intent === 'question' && /(왜|어떻게|무엇|궁금|질문|알려)/i.test(lowered)) score += 6;
+  if (profile.intent === 'action' && /(해야|필요|진행|보내|확인|수정|공유|처리)/i.test(lowered)) score += 6;
+  if (profile.intent === 'apology' && /(죄송|미안|실수|사과|delay|confusion)/i.test(lowered)) score += 6;
+  if (profile.tone === 'formal') score += 1;
+  if (structure.longForm) score += Math.min(4, Math.floor(clause.length / 24));
+  if (structure.fillerCount > 0) score += 1;
+  if (/^(근데|그리고|그래서|다만|하지만|그런데)/.test(lowered)) score -= 1;
+  if (contentTokens.length <= 2) score -= 2;
+
+  return score;
+}
+
+function scoreFragment(fragment, profile, structure) {
+  return scoreClause(fragment, profile, structure) + (fragment.length > 80 ? 2 : 0);
+}
+
+function chooseVariantOpener(profile, structure, mode) {
+  const label = profile.mlFocus.label;
+  if (mode === 'summary') {
+    if (label === 'question') return '질문하신 내용을 정리하면';
+    if (label === 'action') return '실행 관점에서 정리하면';
+    if (label === 'apology') return '죄송하지만 정리하면';
+    if (label === 'polite') return '말씀드리면';
+    if (structure.shouldSummarize) return '정리하면';
+    return '핵심은';
+  }
+
+  if (label === 'question') return '즉';
+  if (label === 'action') return '해야 할 일은';
+  if (label === 'apology') return '죄송하지만';
+  if (label === 'summary') return '쉽게 말하면';
+  if (profile.tone === 'formal') return '말씀드리면';
+  return '정리해 보면';
+}
+
+function stitchClauses(clauses, mode) {
+  if (!clauses.length) return '';
+  if (clauses.length === 1) return clauses[0];
+
+  const connectors = mode === 'summary'
+    ? ['', ' 그리고', ' 다만', ' 또한']
+    : ['', ' 그리고', ' 그런데', ' 그래서'];
+
+  return clauses
+    .map((clause, index) => {
+      if (index === 0) return clause;
+      const connector = connectors[(index - 1) % connectors.length] || ' 그리고';
+      return `${connector} ${stripLeadingConnector(clause)}`.trim();
+    })
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+}
+
+function stripLeadingConnector(text) {
+  return normalizeWhitespace(text).replace(/^(그리고|그런데|그래서|다만|하지만|또|즉|결국)\s+/i, '').trim();
+}
+
+function applyTranscriptCorrections(text) {
+  return normalizeWhitespace(text)
+    .replace(/상황으로 인지하고/g, '상황을 인지하고')
+    .replace(/데이터가 부족해 가지고/g, '데이터가 부족해서')
+    .replace(/부족해셔/g, '부족해서')
+    .replace(/자연 처리/g, '자연어 처리')
+    .replace(/구체적으로 해야 돼/g, '구체적으로 해야 합니다')
+    .replace(/구체적으로 해야돼/g, '구체적으로 해야 합니다')
+    .replace(/명확하게 해야 돼/g, '명확하게 해야 합니다')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
 }
 
 function applyPhoneticFixes(text) {

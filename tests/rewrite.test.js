@@ -56,3 +56,13 @@ test('buildRewriteVariants는 원문이 비었을 때 안내 문구를 반환한
   assert.equal(variants.length, 3);
   assert.ok(variants.every((variant) => variant.text.includes('정지하면')));
 });
+
+test('buildRewriteVariants는 긴 문맥 입력을 실제로 재구성한다', () => {
+  const raw = '자연으로 명령을 하면 명령을 받아 보고 상황이라든지 그런 것들이 ai가 상황으로 인지하고 그거에 대한 도장까지 무시해 달라고 해서 원하는 상황을 제시할 수 있어 비용 이런 명령을 이제 제어가 받아들이고 각성이 돼야지 구체적으로 해야 돼 다들 오래 보다 보던 것들 뉴스가 이거는 이제 데이터가 부족해 가지고 이것은 이제 데이터가 부족해 가지고 좀 거래되는지 그런 데이터 자연 처리 부족해셔 그런가.';
+  const variants = buildRewriteVariants(raw);
+
+  assert.notEqual(variants[1].text, raw);
+  assert.notEqual(variants[2].text, raw);
+  assert.ok(/정리|핵심|실행|말씀/.test(variants[1].text));
+  assert.ok(/정리|핵심|실행|말씀/.test(variants[2].text));
+});
