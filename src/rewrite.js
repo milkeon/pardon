@@ -1,72 +1,31 @@
-const EN_KO_MAP = [
-  [/에이피아이/gi, 'API'],
-  [/깃\s*커밋/gi, 'Git commit'],
-  [/커밋/gi, 'commit'],
-  [/기세\s*커밋/gi, 'Git에 commit'],
-  [/깃/gi, 'Git'],
-  [/서버/gi, 'Server'],
-  [/포트/gi, 'Port'],
-  [/빌드/gi, 'Build'],
-  [/머신\s*러닝/gi, 'Machine Learning'],
-  [/머신러닝/gi, 'Machine Learning'],
-  [/디비/gi, 'DB'],
-  [/데이터\s*베이스/gi, 'Database'],
-  [/데이터베이스/gi, 'Database'],
-  [/코드/gi, 'Code'],
-  [/테스트/gi, 'Test'],
-  [/프로세스/gi, 'Process'],
-  [/에러/gi, 'Error'],
-  [/(?<![가-힣])로그(?![가-힣])/gi, 'Log'],
-  [/오디오/gi, 'Audio'],
-  [/마이크/gi, 'Mic'],
-  [/도커/gi, 'Docker'],
-  [/조커/gi, 'Docker'], // 사용자가 '조커'라고 발음한 오역 복원 규칙 추가!
-  [/컨테이너/gi, 'Container'],
-  [/브랜치/gi, 'Branch'],
-  [/머지/gi, 'Merge'],
-  [/풀\s*리퀘/gi, 'PR (Pull Request)'],
-  [/풀리퀘/gi, 'PR (Pull Request)'],
-  [/a i/gi, 'AI'], // 띄어쓰기 깨진 AI 교정
-  [/에이아이/gi, 'AI'],
-  [/이이엠브이/gi, 'env 가상환경'],
-  [/이엠브이/gi, 'env 가상환경'],
-  [/이엠 브이/gi, 'env 가상환경'],
-  [/이 엠 브이/gi, 'env 가상환경'],
-  [/이 엠브이/gi, 'env 가상환경'],
-  [/가상\s*환경/gi, '가상환경(venv)'],
-  [/브이엔디/gi, 'venv'],
-  [/벤드/gi, 'venv'],
-  [/vend/gi, 'venv'],
-  [/구포/gi, 'Kube(쿠버네티스)'],
-  [/데이터스/gi, '데이터셋(Dataset)'],
-  [/파이썬/gi, 'Python'],
-  [/딥러닝/gi, 'Deep Learning'],
-  [/모델\s*학습/gi, 'Model Training']
-];
+const DEFAULT_CONTEXT_HINTS = ['명확함', '친절함', '간결함'];
 
 const TRANSFORMERS = [
   {
-    id: 'p1',
-    label: '가능성 1 (가장 유력)',
-    build: ({ text }) => {
-      // 1. 말더듬 제거 + 한영 보정이 완료된 가장 깔끔한 표준 복원
-      return applyEnglishCorrection(simplifyText(text));
+    id: 'possibility-1',
+    label: '가능성 1',
+    build: ({ text, profile }) => {
+      const core = simplifyText(text);
+      const note = summaryNote(profile, '가장 직접적인 해석');
+      return note ? `${core} — ${note}` : core;
     }
   },
   {
-    id: 'p2',
-    label: '가능성 2 (유사 발음 교정)',
-    build: ({ text }) => {
-      // 2. 혹시 일반적인 단어로 혼동되었을 가능성까지 감안한 대체어 및 발음 정돈 대안
-      return phoneticAlternative(simplifyText(text));
+    id: 'possibility-2',
+    label: '가능성 2',
+    build: ({ text, profile }) => {
+      const core = adaptToContext(text, profile);
+      const note = summaryNote(profile, '문맥을 반영한 보정');
+      return note ? `${core} (${note})` : core;
     }
   },
   {
-    id: 'p3',
-    label: '가능성 3 (구어 정돈 보정)',
-    build: ({ text }) => {
-      // 3. 구어체 발음을 격식 있는 실무 대화체/구문체 문맥으로 자연스럽게 풀어 쓴 자연어 해석
-      return professionalPolishing(applyEnglishCorrection(simplifyText(text)));
+    id: 'possibility-3',
+    label: '가능성 3',
+    build: ({ text, profile }) => {
+      const core = makeActionable(text, profile);
+      const note = summaryNote(profile, '실행 중심 요약');
+      return note ? `${core}\n\n${note}` : core;
     }
   }
 ];
@@ -75,67 +34,216 @@ export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function applyEnglishCorrection(text) {
-  let base = String(text ?? '');
-  // 사전을 순회하며 오역된 한글 발음들을 영문 알파벳/혼용 단어로 세련되게 치환
-  for (const [regex, replacement] of EN_KO_MAP) {
-    base = base.replace(regex, replacement);
-  }
-  return base;
+export function inferContextHints(context) {
+  const source = normalizeWhitespace(context).toLowerCase();
+  const hints = [];
+
+  if (!source) return DEFAULT_CONTEXT_HINTS;
+  if (/(email|mail|이메일)/i.test(source)) hints.push('professional', 'polished');
+  if (/(chat|slack|메신저|dm|discord)/i.test(source)) hints.push('casual', 'direct');
+  if (/(client|고객|customer|환자|member)/i.test(source)) hints.push('courteous', 'helpful');
+  if (/(summary|요약|report|보고)/i.test(source)) hints.push('concise', 'structured');
+  if (/(apology|sorry|미안|사과)/i.test(source)) hints.push('humble', 'warm');
+  if (/(presentation|발표|talk|설명)/i.test(source)) hints.push('confident', 'clear');
+  if (/(korean|한국어|존댓말|polite)/i.test(source)) hints.push('polite');
+  if (/(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source)) hints.push('urgent', 'actionable');
+
+  return hints.length ? [...new Set(hints)] : DEFAULT_CONTEXT_HINTS;
 }
 
-export function buildRewriteVariants(text) {
-  const cleanedText = text ? text.trim() : '';
+export function deriveContextProfile(context, transcript = '') {
+  const combined = normalizeWhitespace(`${context} ${transcript}`).toLowerCase();
+  const hints = inferContextHints(context);
+
+  const channel = /(email|mail|이메일)/i.test(combined)
+    ? 'email'
+    : /(chat|slack|메신저|dm|discord)/i.test(combined)
+      ? 'chat'
+      : /(report|보고|summary|요약)/i.test(combined)
+        ? 'report'
+        : /(presentation|발표|talk|설명)/i.test(combined)
+          ? 'presentation'
+          : 'general';
+
+  const audience = /(customer|고객|client|환자|member)/i.test(combined)
+    ? 'customer'
+    : /(team|팀|동료|cohort|group)/i.test(combined)
+      ? 'team'
+      : /(boss|manager|lead|상사)/i.test(combined)
+        ? 'manager'
+        : 'general';
+
+  const tone = /(urgent|급함|긴급|asap|빨리|지금)/i.test(combined)
+    ? 'urgent'
+    : /(sorry|apology|미안|사과)/i.test(combined)
+      ? 'apologetic'
+      : /(formal|공식|정중|존댓말|polite)/i.test(combined)
+        ? 'formal'
+        : /(chat|slack|메신저|dm|discord)/i.test(combined)
+          ? 'casual'
+          : /(summary|요약|report|보고)/i.test(combined)
+            ? 'concise'
+            : 'neutral';
+
+  const intent = /(ask|question|why|how|what|궁금|문의)/i.test(combined)
+    ? 'question'
+    : /(sorry|apology|미안|사과)/i.test(combined)
+      ? 'apology'
+      : /(update|report|보고|status|상황)/i.test(combined)
+        ? 'update'
+        : /(next step|action|해야|할 일|to do|todo)/i.test(combined)
+          ? 'action'
+          : 'general';
+
+  const urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(combined) ? 'high' : 'normal';
+
+  return { channel, audience, tone, intent, urgency, hints };
+}
+
+export function buildRemotePrompt({ transcript, context = '' }) {
+  const profile = deriveContextProfile(context, transcript);
+
+  return {
+    model: 'gpt-4o-mini',
+    temperature: 0.3,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          '너는 음성 인식 결과를 바탕으로 사용자가 실제로 의도했을 가능성이 높은 3가지 해석안을 만드는 편집 도우미다. 반드시 문맥 프로필을 반영하고, 세 후보는 서로 의미가 겹치지 않게 구분하라. 출력은 JSON 객체만 허용하며 키는 possibility1, possibility2, possibility3만 사용한다. 각 값은 자연스러운 한국어 또는 원문 언어로 작성하되, 설명 문구나 메타 설명은 넣지 마라. 세 후보의 역할은 다음과 같다: 가능성 1 = 가장 직접적인 해석, 가능성 2 = 문맥 보정 해석, 가능성 3 = 실행/요약 중심 해석.'
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({ transcript, context, profile })
+      }
+    ]
+  };
+}
+
+export function buildRewriteVariants(text, context = '') {
+  const cleanedText = normalizeWhitespace(text);
+  const profile = deriveContextProfile(context, cleanedText);
 
   if (!cleanedText) {
     return TRANSFORMERS.map((variant) => ({
       id: variant.id,
       label: variant.label,
-      text: '텍스트가 들어오면 세 가지 해석 가능성 대안이 표시됩니다.'
+      text: '텍스트가 들어오면 세 가지 가능성이 표시됩니다.'
     }));
   }
 
   return TRANSFORMERS.map((variant) => ({
     id: variant.id,
     label: variant.label,
-    text: finalizeVariantText(
-      variant.build({ text: cleanedText })
-    )
+    text: finalizeVariantText(variant.build({ text: cleanedText, profile }))
   }));
 }
 
 function simplifyText(text) {
-  // 음성 인식 도중 극심하게 꼬인 군더더기 어휘, 추임새, 말더듬용 단어들을 지능적으로 싹 제거합니다.
-  const withoutFillers = String(text ?? '')
-    .replace(/\b(아|음|어|그|저|습|읍|엄|actually|basically|거기|그거|그게|되게|이제|아무래도|어떤|그런|그렇게|되게\s*민감하게|가지고|가지고\s*아|가지고\s*어)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const withoutFillers = normalizeWhitespace(text)
+    .replace(/\b(um+|uh+|like|you know|actually|basically)\b/gi, '')
+    .replace(/\s+,/g, ',')
+    .replace(/\s+([?.!,;:])/g, '$1');
 
-  return withoutFillers || String(text ?? '').trim();
+  return withoutFillers || normalizeWhitespace(text);
 }
 
-function phoneticAlternative(text) {
-  const corrected = applyEnglishCorrection(text);
-  // 발음 상 다르게 해석되었을 여지(예: 깃 -> 깃허브 확장 표기 등)를 제공
-  return corrected
-    .replace(/\bGit\b/g, 'GitHub')
-    .replace(/\bAPI\b/g, 'API endpoint')
-    .replace(/\bServer\b/g, 'Back-end server');
-}
+function adaptToContext(text, profile) {
+  const base = simplifyText(text);
 
-function professionalPolishing(text) {
-  let base = String(text ?? '');
-  // 격식 있게 정돈된 형태의 어조 보완
-  if (!base.endsWith('.') && !base.endsWith('?') && !base.endsWith('!')) {
-    base = `${base}.`;
+  if (profile.tone === 'formal' || profile.audience === 'customer') {
+    return softenText(base);
   }
+
+  if (profile.channel === 'chat' || profile.urgency === 'high') {
+    return tightenText(base);
+  }
+
+  if (profile.intent === 'question') {
+    return ensureQuestionTone(base);
+  }
+
+  if (profile.intent === 'update' || profile.channel === 'report') {
+    return structureAsUpdate(base);
+  }
+
   return base;
+}
+
+function softenText(text) {
+  const base = simplifyText(text)
+    .replace(/^i\s+need\s+to\b/i, "I'd appreciate it if we could")
+    .replace(/^i\s+want\s+to\b/i, "I'd like to")
+    .replace(/^i\s+can't\b/i, 'I may not be able to')
+    .replace(/^i\s+cannot\b/i, 'I may not be able to')
+    .replace(/\b(can't|cannot)\b/gi, 'may not be able to')
+    .replace(/\bwant to\b/gi, 'would like to')
+    .replace(/\bneed to\b/gi, 'would appreciate it if we could');
+
+  if (/\?$/.test(base)) return base;
+  if (/[.!]$/.test(base)) return base;
+  return `${base}.`;
+}
+
+function tightenText(text) {
+  const result = simplifyText(text)
+    .replace(/\b(I think|maybe|perhaps|probably)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?]$/, '');
+
+  return result || simplifyText(text);
+}
+
+function ensureQuestionTone(text) {
+  const base = simplifyText(text);
+  return /\?$/.test(base) ? base : `${base}?`;
+}
+
+function structureAsUpdate(text) {
+  const base = simplifyText(text);
+  const sentences = base.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length > 1) {
+    return `업데이트:\n- ${sentences.join('\n- ')}`;
+  }
+  return `업데이트: ${base}`;
+}
+
+function makeActionable(text, profile) {
+  const base = simplifyText(text)
+    .replace(/^(please\s+)?/i, '')
+    .replace(/\bwe should\b/gi, 'let’s')
+    .replace(/\b(i need to|need to)\b/gi, 'next step:')
+    .replace(/\b(can you|could you)\b/gi, 'please');
+
+  if (profile.urgency === 'high') {
+    return `우선순위 높음: ${base}`;
+  }
+
+  const sentences = base.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length > 1) {
+    return `실행 계획:\n- ${sentences.join('\n- ')}`;
+  }
+  return `실행 계획: ${base}`;
+}
+
+function summaryNote(profile, fallback) {
+  const parts = [];
+  if (profile.channel !== 'general') parts.push(profile.channel);
+  if (profile.audience !== 'general') parts.push(profile.audience);
+  if (profile.tone !== 'neutral') parts.push(profile.tone);
+  if (profile.intent !== 'general') parts.push(profile.intent);
+  if (profile.urgency === 'high') parts.push('긴급');
+
+  const note = parts.length ? parts.join(' · ') : fallback;
+  return `맥락: ${note}`;
 }
 
 function finalizeVariantText(value) {
   return String(value ?? '')
     .split(/\n+/)
-    .map((line) => line.trim())
+    .map((line) => normalizeWhitespace(line))
     .filter(Boolean)
     .join('\n')
     .trim();
