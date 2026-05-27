@@ -12,7 +12,8 @@ const els = {
   supportStatus: document.querySelector('#support-status'),
   recordingBadge: document.querySelector('#recording-badge'),
   variantList: document.querySelector('#variant-list'),
-  emptyState: document.querySelector('#variants-empty')
+  emptyState: document.querySelector('#variants-empty'),
+  contextHint: document.querySelector('#context-hint')
 };
 
 const state = {
@@ -36,6 +37,11 @@ function initialize() {
   updateSupportStatus();
   renderVariants();
   wireEvents();
+
+  // [사용자 규칙] 인풋이 활성화되면 항상 기본으로 커서가 잡히도록 포커싱을 부여합니다!
+  if (els.contextHint) {
+    els.contextHint.focus();
+  }
 }
 
 function wireEvents() {
@@ -45,6 +51,16 @@ function wireEvents() {
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
   els.transcript.addEventListener('input', onTranscriptEdit);
+
+  // [사용자 규칙] 인풋은 엔터 누르면 확인/저장(다시 분석) 버튼이 항상 연동되도록 이벤트 리스너 바인딩!
+  if (els.contextHint) {
+    els.contextHint.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleGenerateClicked();
+      }
+    });
+  }
 }
 
 async function startCapture() {
@@ -412,10 +428,11 @@ async function handleGenerateClicked() {
 }
 
 async function generateServerVariants(transcript) {
+  const hint = els.contextHint ? els.contextHint.value.trim() : '';
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transcript })
+    body: JSON.stringify({ transcript, hint })
   });
 
   if (!response.ok) {

@@ -18,6 +18,12 @@
       </section>
 
       <section class="panel panel--controls">
+        <!-- 주제 및 용어 힌트 인풋 패널 추가 (영어 복원율 및 특정 주제 정돈용) -->
+        <div class="field field--hint" style="margin: 0 0 18px 0;">
+          <span style="font-weight: 700; color: var(--primary); display: inline-flex; align-items: center; gap: 6px;">🎯 주제 및 용어 힌트 (영어 유연 복원 & 맥락 특정용)</span>
+          <input type="text" id="context-hint" placeholder="예: SQLD 요약, Docker 배포, API 연동, 블로그 글쓰기" style="margin-top: 8px;" />
+        </div>
+
         <div class="control-row">
           <button class="button button--primary" data-action="start-recording">녹음 시작</button>
           <button class="button" data-action="stop-recording" disabled>정지</button>
