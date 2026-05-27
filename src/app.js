@@ -26,7 +26,8 @@ const state = {
   interimTranscript: '',
   selectedVariantId: 'clean',
   selectedAudioUrl: '',
-  variants: []
+  variants: [],
+  isCapturing: false // 명시적인 음성 및 STT 캡처 진행 여부 상태 추가
 };
 
 initialize();
@@ -56,6 +57,9 @@ async function startCapture() {
     state.recorder.addEventListener('stop', onRecorderStop);
     state.recorder.start();
 
+    // 캡처 상태 활성화
+    state.isCapturing = true;
+
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
     if (recognition) {
@@ -68,11 +72,15 @@ async function startCapture() {
     setRecording(true);
     setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
   } catch (error) {
+    state.isCapturing = false;
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
 }
 
 function stopCapture() {
+  // 캡처 상태 비활성화
+  state.isCapturing = false;
+
   if (state.recognition) {
     try {
       state.recognition.stop();
@@ -82,7 +90,11 @@ function stopCapture() {
   }
 
   if (state.recorder && state.recorder.state !== 'inactive') {
-    state.recorder.stop();
+    try {
+      state.recorder.stop();
+    } catch {
+      // ignore
+    }
   }
 
   if (state.stream) {
@@ -143,10 +155,31 @@ function onRecognitionResult(event) {
 }
 
 function onRecognitionError(event) {
+  // no-speech(무음)이나 aborted(세션 취소)는 사용자가 침묵하거나 순간적으로 끊겼을 때 빈번하므로 조용히 처리합니다.
+  if (event.error === 'no-speech' || event.error === 'aborted') {
+    return;
+  }
   setStatus(`음성 인식 오류: ${event.error}`);
 }
 
 function onRecognitionEnd() {
+  // 사용자가 명시적으로 정지 버튼을 누르지 않았는데 브라우저 타임아웃 등으로 꺼진 경우 새 인스턴스로 자동 재시작
+  if (state.isCapturing) {
+    try {
+      const recognition = createSpeechRecognition();
+      state.recognition = recognition;
+      if (recognition) {
+        recognition.onresult = onRecognitionResult;
+        recognition.onerror = onRecognitionError;
+        recognition.onend = onRecognitionEnd;
+        recognition.start();
+      }
+      return;
+    } catch (e) {
+      console.error('STT 재시작 실패:', e);
+    }
+  }
+
   state.recognition = null;
 
   if (state.recorder && state.recorder.state !== 'inactive') {
