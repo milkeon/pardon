@@ -66,6 +66,17 @@ h1 {
   margin-bottom: 14px;
 }
 
+.brand-title {
+  font-size: clamp(3.5rem, 8vw, 6.5rem);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--accent), var(--primary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 0;
+  line-height: 1.05;
+}
+
 .lead {
   max-width: 62ch;
   color: var(--muted);
