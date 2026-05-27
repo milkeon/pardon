@@ -130,41 +130,43 @@ export function buildRewriteVariants(text) {
     return [
       {
         id: 'possibility-1',
-        label: '가능성 1 · 보수 복원본',
-        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
+        label: '제안 1 · 원문 보정',
+        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       },
       {
         id: 'possibility-2',
-        label: '가능성 2 · 균형 복원본',
-        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
+        label: '제안 2 · 자연스러운 문장',
+        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       },
       {
         id: 'possibility-3',
-        label: '가능성 3 · 정리 복원본',
-        text: '녹음을 정지하면 보수 복원본, 균형 복원본, 정리 복원본이 표시됩니다.'
+        label: '제안 3 · 정리된 문장',
+        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       }
     ];
   }
 
   const profile = deriveContextProfile(rawText);
   const phonetic = buildPhoneticVariant(rawText);
-  const balanced = buildContextVariant(rawText, profile);
-  const organized = buildCombinedVariant(rawText, profile, phonetic, balanced);
+  const balanced = looksLikeConversation(rawText)
+    ? buildDialogueVariant(rawText, profile)
+    : buildPoliteVariant(rawText);
+  const organized = buildSummaryVariant(rawText, profile);
 
   return [
     {
       id: 'possibility-1',
-      label: '가능성 1 · 보수 복원본',
+      label: '제안 1 · 원문 보정',
       text: phonetic
     },
     {
       id: 'possibility-2',
-      label: '가능성 2 · 균형 복원본',
+      label: '제안 2 · 자연스러운 문장',
       text: balanced
     },
     {
       id: 'possibility-3',
-      label: '가능성 3 · 정리 복원본',
+      label: '제안 3 · 정리된 문장',
       text: organized
     }
   ];
@@ -235,7 +237,7 @@ function buildCombinedVariant(text, profile, phonetic, contextual) {
   return ensureSentenceEnding(merged);
 }
 
-function buildDialogueVariant(text, profile, structure = analyzeTranscriptStructure(text, profile)) {
+function buildDialogueVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {
   const base = normalizeWhitespace(text);
   const cleaned = applyTranscriptCorrections(cleanSpokenKorean(base));
   const fragments = extractSalientFragments(cleaned, profile, structure, 2);
@@ -250,7 +252,7 @@ function buildDialogueVariant(text, profile, structure = analyzeTranscriptStruct
 }
 
 function buildPoliteVariant(text) {
-  const dialogue = buildDialogueVariant(text, { intent: 'summary' });
+  const dialogue = buildDialogueVariant(text, deriveContextProfile(text));
   return polishForDelivery(dialogue)
     .replace(/\b괜찮습니다\b/g, '괜찮습니다')
     .replace(/\b합니다\b/g, '합니다')
@@ -312,6 +314,14 @@ function cleanSpokenKorean(text) {
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.!?;:])/g, '$1')
     .trim();
+}
+
+function splitForSpeech(text) {
+  return normalizeWhitespace(text)
+    .replace(/([.!?])/g, '$1|')
+    .split('|')
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
 }
 
 function splitTranscriptClauses(text) {
