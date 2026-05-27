@@ -1,5 +1,6 @@
 import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js';
 import { mergeRecognitionResults } from './stt.js';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -20,6 +21,10 @@ const state = {
   recorder: null,
   recognition: null,
   stream: null,
+  audioContext: null,
+  audioSource: null,
+  audioAnalyser: null,
+  audioSamples: null,
   chunks: [],
   transcript: '',
   recognitionSegments: [],
@@ -28,8 +33,17 @@ const state = {
   selectedAudioUrl: '',
   variants: [],
   readyForVariants: false,
+  lastVoiceAt: 0,
+  isStopping: false,
+  voiceMonitorTimer: null,
+  recognitionRestartTimer: null,
   toastTimer: null
 };
+
+const SILENCE_TIMEOUT_MS = 60_000;
+const VOICE_CHECK_INTERVAL_MS = 1000;
+const VOICE_LEVEL_THRESHOLD = 0.015;
+const RECOGNITION_RESTART_DELAY_MS = 500;
 
 initialize();
 
@@ -51,12 +65,15 @@ function wireEvents() {
 async function startCapture() {
   try {
     clearSessionState();
+    state.isStopping = false;
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.chunks = [];
     state.recorder = new MediaRecorder(state.stream);
     state.recorder.addEventListener('dataavailable', onChunk);
     state.recorder.addEventListener('stop', onRecorderStop);
-    state.recorder.start();
+    state.recorder.start(1000);
+
+    await startVoiceActivityMonitor();
 
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
@@ -68,19 +85,27 @@ async function startCapture() {
     }
 
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 들리는 즉시 STT 원문에 쌓습니다.');
+    setStatus('녹음을 시작했습니다. 음성이 들어오는 동안 STT를 계속 듣고, 1분 무음이면 자동 종료합니다.');
   } catch (error) {
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
+    cleanupAudioActivityMonitor();
   }
 }
 
 function stopCapture() {
+  state.isStopping = true;
+  window.clearTimeout(state.recognitionRestartTimer);
+  state.recognitionRestartTimer = null;
+
+  cleanupAudioActivityMonitor();
+
   if (state.recognition) {
     try {
       state.recognition.stop();
     } catch {
       // ignore
     }
+    state.recognition = null;
   }
 
   if (state.recorder && state.recorder.state !== 'inactive') {
@@ -101,6 +126,7 @@ function stopCapture() {
   renderVariantPlaceholder('정지했습니다. 변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
   setRecording(false);
   setStatus('녹음을 종료했습니다. 이제 변환 버튼으로 3가지 가능성을 만드세요.');
+  state.isStopping = false;
 }
 
 function clearAll() {
@@ -120,6 +146,7 @@ function clearSessionState() {
   state.variants = [];
   state.readyForVariants = false;
   state.selectedVariantId = 'possibility-1';
+  state.lastVoiceAt = 0;
 }
 
 function onChunk(event) {
@@ -157,20 +184,17 @@ function onRecognitionResult(event) {
 
 function onRecognitionError(event) {
   setStatus(`음성 인식 오류: ${event.error}`);
+  if (event.error === 'no-speech' || event.error === 'aborted') {
+    scheduleRecognitionRestart();
+  }
 }
 
 function onRecognitionEnd() {
   state.recognition = null;
 
-  if (state.recorder && state.recorder.state !== 'inactive') {
-    try {
-      state.recorder.stop();
-    } catch {
-      // ignore
-    }
+  if (shouldRestartRecognition({ isRecording: state.recorder?.state === 'recording', isStopping: state.isStopping })) {
+    scheduleRecognitionRestart();
   }
-
-  setRecording(false);
 }
 
 function onTranscriptEdit() {
@@ -413,6 +437,104 @@ function renderVariantPlaceholder(message) {
   els.variantList.innerHTML = '';
   els.emptyState.hidden = false;
   els.emptyState.textContent = message;
+}
+
+async function startVoiceActivityMonitor() {
+  cleanupAudioActivityMonitor();
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor || !state.stream) return;
+
+  state.audioContext = new AudioContextCtor();
+  if (state.audioContext.state === 'suspended') {
+    try {
+      await state.audioContext.resume();
+    } catch {
+      // ignore
+    }
+  }
+
+  state.audioSource = state.audioContext.createMediaStreamSource(state.stream);
+  state.audioAnalyser = state.audioContext.createAnalyser();
+  state.audioAnalyser.fftSize = 2048;
+  state.audioSamples = new Float32Array(state.audioAnalyser.fftSize);
+  state.audioSource.connect(state.audioAnalyser);
+  state.lastVoiceAt = Date.now();
+
+  state.voiceMonitorTimer = window.setInterval(() => {
+    if (!state.recorder || state.recorder.state !== 'recording' || !state.audioAnalyser || !state.audioSamples) return;
+
+    state.audioAnalyser.getFloatTimeDomainData(state.audioSamples);
+    const level = calculateRms(state.audioSamples);
+    if (level >= VOICE_LEVEL_THRESHOLD) {
+      state.lastVoiceAt = Date.now();
+      return;
+    }
+
+    if (hasTimedOutSince(state.lastVoiceAt, Date.now(), SILENCE_TIMEOUT_MS)) {
+      stopCapture();
+      setStatus('1분 동안 무음이어서 자동으로 녹음을 종료했습니다.');
+    }
+  }, VOICE_CHECK_INTERVAL_MS);
+}
+
+function cleanupAudioActivityMonitor() {
+  if (state.voiceMonitorTimer) {
+    window.clearInterval(state.voiceMonitorTimer);
+    state.voiceMonitorTimer = null;
+  }
+
+  if (state.audioSource) {
+    try {
+      state.audioSource.disconnect();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (state.audioAnalyser) {
+    try {
+      state.audioAnalyser.disconnect();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (state.audioContext) {
+    try {
+      state.audioContext.close();
+    } catch {
+      // ignore
+    }
+  }
+
+  state.audioContext = null;
+  state.audioSource = null;
+  state.audioAnalyser = null;
+  state.audioSamples = null;
+}
+
+function scheduleRecognitionRestart() {
+  if (!shouldRestartRecognition({ isRecording: state.recorder?.state === 'recording', isStopping: state.isStopping })) return;
+
+  window.clearTimeout(state.recognitionRestartTimer);
+  state.recognitionRestartTimer = window.setTimeout(() => {
+    if (!shouldRestartRecognition({ isRecording: state.recorder?.state === 'recording', isStopping: state.isStopping })) return;
+
+    const recognition = createSpeechRecognition();
+    state.recognition = recognition;
+    if (!recognition) return;
+
+    recognition.onresult = onRecognitionResult;
+    recognition.onerror = onRecognitionError;
+    recognition.onend = onRecognitionEnd;
+
+    try {
+      recognition.start();
+    } catch (error) {
+      setStatus(`음성 인식을 다시 시작할 수 없습니다: ${friendlyError(error)}`);
+    }
+  }, RECOGNITION_RESTART_DELAY_MS);
 }
 
 function copyTextToClipboard(text) {
