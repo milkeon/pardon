@@ -1,4 +1,5 @@
 import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js';
+import { mergeRecognitionResults } from './stt.js';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -20,7 +21,7 @@ const state = {
   stream: null,
   chunks: [],
   transcript: '',
-  interimTranscript: '',
+  recognitionSegments: [],
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
@@ -110,7 +111,7 @@ function clearAll() {
 function clearSessionState() {
   state.chunks = [];
   state.transcript = '';
-  state.interimTranscript = '';
+  state.recognitionSegments = [];
   state.variants = [];
   state.readyForVariants = false;
   state.selectedVariantId = 'possibility-1';
@@ -129,25 +130,14 @@ function onRecorderStop() {
 }
 
 function onRecognitionResult(event) {
-  let finalText = '';
-  let interimText = '';
+  const recognitionResults = Array.from(event.results, (result) => ({
+    transcript: result[0].transcript
+  }));
+  const merged = mergeRecognitionResults(state.recognitionSegments, recognitionResults);
 
-  for (let i = event.resultIndex; i < event.results.length; i += 1) {
-    const segment = event.results[i][0].transcript;
-    if (event.results[i].isFinal) {
-      finalText += segment;
-    } else {
-      interimText += segment;
-    }
-  }
-
-  if (finalText) {
-    state.transcript = normalizeWhitespace(`${state.transcript} ${finalText}`);
-  }
-
-  state.interimTranscript = normalizeWhitespace(interimText);
-  const liveTranscript = normalizeWhitespace(`${state.transcript} ${state.interimTranscript}`);
-  setTranscript(liveTranscript);
+  state.recognitionSegments = merged.segments;
+  state.transcript = merged.transcript;
+  setTranscript(merged.transcript);
 
   if (state.readyForVariants) {
     renderVariants();
@@ -176,7 +166,7 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
-  state.interimTranscript = '';
+  state.recognitionSegments = [els.transcript.value];
   if (state.readyForVariants) {
     renderVariants();
   }

@@ -11,6 +11,8 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('원문 STT'));
   assert.ok(html.includes('가능성 3가지'));
   assert.ok(html.includes('선택한 문장 복사'));
+  assert.ok(html.includes('spellcheck="false"'));
+  assert.ok(html.includes('autocorrect="off"'));
   assert.ok(!html.includes('문맥 힌트'));
 });
 
