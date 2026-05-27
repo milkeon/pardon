@@ -1,249 +1,360 @@
 import { predictRewriteFocus } from './ml.js';
 
-const DEFAULT_CONTEXT_HINTS = ['명확함', '친절함', '간결함'];
-
-const TRANSFORMERS = [
-  {
-    id: 'possibility-1',
-    label: '가능성 1',
-    build: ({ text, profile }) => {
-      const core = simplifyText(text);
-      const note = summaryNote(profile, '가장 직접적인 해석');
-      return note ? `${core} — ${note}` : core;
-    }
-  },
-  {
-    id: 'possibility-2',
-    label: '가능성 2',
-    build: ({ text, profile }) => {
-      const core = adaptToContext(text, profile);
-      const note = summaryNote(profile, '문맥을 반영한 보정');
-      return note ? `${core} (${note})` : core;
-    }
-  },
-  {
-    id: 'possibility-3',
-    label: '가능성 3',
-    build: ({ text, profile }) => {
-      const core = makeActionable(text, profile);
-      const note = summaryNote(profile, '실행 중심 요약');
-      return note ? `${core}\n\n${note}` : core;
-    }
-  }
+const DEFAULT_HINTS = ['명확함', '자연스러움', '정리됨'];
+const PHONETIC_REPLACEMENTS = [
+  [/\buh\b/gi, ''],
+  [/\bum\b/gi, ''],
+  [/\blike\b/gi, ''],
+  [/\byou know\b/gi, ''],
+  [/\bactually\b/gi, ''],
+  [/\bbasically\b/gi, ''],
+  [/\bkind of\b/gi, 'kind of'],
+  [/\bsort of\b/gi, 'sort of'],
+  [/\bgonna\b/gi, 'going to'],
+  [/\bwanna\b/gi, 'want to'],
+  [/\bgotta\b/gi, 'have to'],
+  [/\bcould of\b/gi, 'could have'],
+  [/\bshould of\b/gi, 'should have'],
+  [/\bwould of\b/gi, 'would have'],
+  [/\bim\b/gi, "I'm"],
+  [/\bdont\b/gi, "don't"],
+  [/\bcant\b/gi, "can't"],
+  [/\bwont\b/gi, "won't"],
+  [/\bisnt\b/gi, "isn't"],
+  [/\barent\b/gi, "aren't"],
+  [/\b어\b/g, ''],
+  [/\b음\b/g, ''],
+  [/\b그\b/g, ''],
+  [/\b저\b/g, ''],
+  [/\b그러니까\b/g, ''],
+  [/\b뭐지\b/g, ''],
+  [/\b뭐였더라\b/g, '']
 ];
 
 export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-export function inferContextHints(context) {
-  const source = normalizeWhitespace(context).toLowerCase();
-  const hints = [];
+export function deriveContextProfile(text = '') {
+  const source = normalizeWhitespace(text).toLowerCase();
+  const hints = inferContextHints(source);
+  const mlFocus = predictRewriteFocus(source);
 
-  if (!source) return DEFAULT_CONTEXT_HINTS;
-  if (/(email|mail|이메일)/i.test(source)) hints.push('professional', 'polished');
-  if (/(chat|slack|메신저|dm|discord)/i.test(source)) hints.push('casual', 'direct');
-  if (/(client|고객|customer|환자|member)/i.test(source)) hints.push('courteous', 'helpful');
-  if (/(summary|요약|report|보고)/i.test(source)) hints.push('concise', 'structured');
-  if (/(apology|sorry|미안|사과)/i.test(source)) hints.push('humble', 'warm');
-  if (/(presentation|발표|talk|설명)/i.test(source)) hints.push('confident', 'clear');
-  if (/(korean|한국어|존댓말|polite)/i.test(source)) hints.push('polite');
-  if (/(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source)) hints.push('urgent', 'actionable');
-
-  return hints.length ? [...new Set(hints)] : DEFAULT_CONTEXT_HINTS;
-}
-
-export function deriveContextProfile(context, transcript = '') {
-  const combined = normalizeWhitespace(`${context} ${transcript}`).toLowerCase();
-  const hints = inferContextHints(context);
-  const mlFocus = predictRewriteFocus(combined);
-
-  let channel = /(email|mail|이메일)/i.test(combined)
+  let channel = /(email|mail|이메일)/i.test(source)
     ? 'email'
-    : /(chat|slack|메신저|dm|discord)/i.test(combined)
+    : /(chat|slack|메신저|dm|discord)/i.test(source)
       ? 'chat'
-      : /(report|보고|summary|요약)/i.test(combined)
+      : /(report|보고|summary|요약)/i.test(source)
         ? 'report'
-        : /(presentation|발표|talk|설명)/i.test(combined)
+        : /(presentation|발표|talk|설명)/i.test(source)
           ? 'presentation'
           : 'general';
 
-  let audience = /(customer|고객|client|환자|member)/i.test(combined)
-    ? 'customer'
-    : /(team|팀|동료|cohort|group)/i.test(combined)
-      ? 'team'
-      : /(boss|manager|lead|상사)/i.test(combined)
-        ? 'manager'
-        : 'general';
-
-  let tone = /(urgent|급함|긴급|asap|빨리|지금)/i.test(combined)
-    ? 'urgent'
-    : /(sorry|apology|미안|사과)/i.test(combined)
-      ? 'apologetic'
-      : /(formal|공식|정중|존댓말|polite)/i.test(combined)
+  let tone = /(sorry|apology|미안|사과)/i.test(source)
+    ? 'apologetic'
+    : /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source)
+      ? 'urgent'
+      : /(formal|공식|정중|존댓말|polite)/i.test(source)
         ? 'formal'
-        : /(chat|slack|메신저|dm|discord)/i.test(combined)
-          ? 'casual'
-          : /(summary|요약|report|보고)/i.test(combined)
-            ? 'concise'
-            : 'neutral';
+        : /(summary|요약|report|보고)/i.test(source)
+          ? 'concise'
+          : 'neutral';
 
-  let intent = /(ask|question|why|how|what|궁금|문의)/i.test(combined)
+  let intent = /(ask|question|why|how|what|궁금|문의)/i.test(source)
     ? 'question'
-    : /(sorry|apology|미안|사과)/i.test(combined)
+    : /(sorry|apology|미안|사과)/i.test(source)
       ? 'apology'
-      : /(update|report|보고|status|상황)/i.test(combined)
+      : /(update|report|보고|status|상황|결과)/i.test(source)
         ? 'update'
-        : /(next step|action|해야|할 일|to do|todo)/i.test(combined)
+        : /(next step|action|해야|할 일|to do|todo|지금 처리)/i.test(source)
           ? 'action'
           : 'general';
 
-  let urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(combined) ? 'high' : 'normal';
+  let urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source) ? 'high' : 'normal';
 
-  if (mlFocus.confidence >= 0.32) {
-    switch (mlFocus.label) {
-      case 'polite':
-        tone = tone === 'urgent' ? tone : 'formal';
-        if (channel === 'general') channel = 'email';
-        break;
-      case 'direct':
-        if (tone === 'neutral') tone = 'casual';
-        if (channel === 'general') channel = 'chat';
-        break;
-      case 'question':
-        intent = 'question';
-        if (tone === 'neutral') tone = 'casual';
-        break;
-      case 'action':
-        intent = 'action';
-        urgency = 'high';
-        if (channel === 'general') channel = 'chat';
-        break;
-      case 'summary':
-        channel = 'report';
-        tone = 'concise';
-        if (intent === 'general') intent = 'update';
-        break;
-      case 'apology':
-        tone = 'apologetic';
-        intent = 'apology';
-        if (channel === 'general') channel = 'email';
-        break;
-      default:
-        break;
-    }
+  switch (mlFocus.label) {
+    case 'question':
+      intent = 'question';
+      if (tone === 'neutral') tone = 'casual';
+      break;
+    case 'action':
+      intent = 'action';
+      urgency = 'high';
+      if (channel === 'general') channel = 'chat';
+      break;
+    case 'summary':
+      channel = 'report';
+      tone = 'concise';
+      if (intent === 'general') intent = 'update';
+      break;
+    case 'apology':
+      tone = 'apologetic';
+      intent = 'apology';
+      break;
+    case 'polite':
+      if (tone === 'neutral') tone = 'formal';
+      break;
+    default:
+      break;
   }
 
-  return { channel, audience, tone, intent, urgency, hints, mlFocus };
+  return { channel, tone, intent, urgency, hints, mlFocus };
 }
 
-export function buildRemotePrompt({ transcript, context = '' }) {
-  const profile = deriveContextProfile(context, transcript);
+export function inferContextHints(text) {
+  const source = normalizeWhitespace(text).toLowerCase();
+  const hints = [];
 
-  return {
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    response_format: { type: 'json_object' },
-    messages: [
+  if (!source) return DEFAULT_HINTS;
+  if (/(email|mail|이메일)/i.test(source)) hints.push('공손함', '문서형');
+  if (/(chat|slack|메신저|dm|discord)/i.test(source)) hints.push('짧음', '직접적');
+  if (/(client|고객|customer|환자|member)/i.test(source)) hints.push('배려', '친절');
+  if (/(summary|요약|report|보고)/i.test(source)) hints.push('간결함', '정리됨');
+  if (/(apology|sorry|미안|사과)/i.test(source)) hints.push('사과', '부드러움');
+  if (/(presentation|발표|talk|설명)/i.test(source)) hints.push('분명함', '자신감');
+  if (/(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source)) hints.push('긴급', '실행');
+
+  return hints.length ? [...new Set(hints)] : DEFAULT_HINTS;
+}
+
+export function buildRewriteVariants(text) {
+  const cleanedText = normalizeWhitespace(text);
+  if (!cleanedText) {
+    return [
       {
-        role: 'system',
-        content:
-          '너는 음성 인식 결과를 바탕으로 사용자가 실제로 의도했을 가능성이 높은 3가지 해석안을 만드는 편집 도우미다. 반드시 문맥 프로필을 반영하고, 세 후보는 서로 의미가 겹치지 않게 구분하라. 출력은 JSON 객체만 허용하며 키는 possibility1, possibility2, possibility3만 사용한다. 각 값은 자연스러운 한국어 또는 원문 언어로 작성하되, 설명 문구나 메타 설명은 넣지 마라. 세 후보의 역할은 다음과 같다: 가능성 1 = 가장 직접적인 해석, 가능성 2 = 문맥 보정 해석, 가능성 3 = 실행/요약 중심 해석.'
+        id: 'possibility-1',
+        label: '가능성 1 · 음성 보정본',
+        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
       },
       {
-        role: 'user',
-        content: JSON.stringify({ transcript, context, profile })
+        id: 'possibility-2',
+        label: '가능성 2 · 맥락 보정본',
+        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
+      },
+      {
+        id: 'possibility-3',
+        label: '가능성 3 · 종합본',
+        text: '녹음을 정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.'
       }
-    ]
-  };
+    ];
+  }
+
+  const profile = deriveContextProfile(cleanedText);
+  const phonetic = buildPhoneticVariant(cleanedText);
+  const contextual = buildContextVariant(cleanedText, profile);
+  const combined = buildCombinedVariant(cleanedText, profile, phonetic, contextual);
+
+  return [
+    {
+      id: 'possibility-1',
+      label: '가능성 1 · 음성 보정본',
+      text: phonetic
+    },
+    {
+      id: 'possibility-2',
+      label: '가능성 2 · 맥락 보정본',
+      text: contextual
+    },
+    {
+      id: 'possibility-3',
+      label: '가능성 3 · 종합본',
+      text: combined
+    }
+  ];
 }
 
-export function buildRewriteVariants(text, context = '') {
-  const cleanedText = normalizeWhitespace(text);
-  const profile = deriveContextProfile(context, cleanedText);
+function buildPhoneticVariant(text) {
+  const lines = normalizeWhitespace(text)
+    .split(/(?<=[.!?])\s+/)
+    .filter(Boolean)
+    .map((line) => applyPhoneticFixes(line));
 
-  if (!cleanedText) {
-    return TRANSFORMERS.map((variant) => ({
-      id: variant.id,
-      label: variant.label,
-      text: '텍스트가 들어오면 세 가지 가능성이 표시됩니다.'
-    }));
-  }
-
-  return TRANSFORMERS.map((variant) => ({
-    id: variant.id,
-    label: variant.label,
-    text: finalizeVariantText(variant.build({ text: cleanedText, profile }))
-  }));
+  const joined = lines.join(' ').replace(/\s+([,.!?;:])/g, '$1');
+  return ensureSentenceEnding(normalizeWhitespace(joined));
 }
 
-function simplifyText(text) {
-  const withoutFillers = normalizeWhitespace(text)
-    .replace(/\b(um+|uh+|like|you know|actually|basically)\b/gi, '')
-    .replace(/\s+,/g, ',')
-    .replace(/\s+([?.!,;:])/g, '$1');
+function buildContextVariant(text, profile) {
+  const base = buildPhoneticVariant(text);
 
-  return withoutFillers || normalizeWhitespace(text);
+  if (profile.intent === 'question') {
+    return buildQuestionVariant(base);
+  }
+
+  if (profile.intent === 'apology') {
+    return buildApologyVariant(base);
+  }
+
+  if (profile.intent === 'update' || profile.channel === 'report') {
+    return buildUpdateVariant(base);
+  }
+
+  if (profile.intent === 'action') {
+    return buildActionVariant(base);
+  }
+
+  if (profile.tone === 'formal' || profile.tone === 'apologetic') {
+    return buildPoliteVariant(base);
+  }
+
+  if (profile.mlFocus.label === 'summary') {
+    return buildUpdateVariant(base);
+  }
+
+  return applyContextCorrections(base);
 }
 
-function adaptToContext(text, profile) {
-  const base = simplifyText(text);
-
-  if (profile.mlFocus?.label === 'apology' || profile.tone === 'apologetic') {
-    return softenText(base);
+function buildCombinedVariant(text, profile, phonetic, contextual) {
+  if (profile.intent === 'action') {
+    return buildCombinedActionVariant(phonetic);
   }
 
-  if (profile.mlFocus?.label === 'summary' || profile.intent === 'update' || profile.channel === 'report') {
-    return structureAsUpdate(base);
+  if (profile.intent === 'question') {
+    return buildQuestionVariant(phonetic);
   }
 
-  if (profile.mlFocus?.label === 'action' || profile.channel === 'chat' || profile.urgency === 'high') {
-    return tightenText(base);
+  if (profile.intent === 'apology') {
+    return buildApologyVariant(phonetic);
   }
 
-  if (profile.mlFocus?.label === 'question' || profile.intent === 'question') {
-    return ensureQuestionTone(base);
+  if (contextual !== phonetic) return contextual;
+  return ensureSentenceEnding(normalizeWhitespace(text));
+}
+
+function applyPhoneticFixes(text) {
+  let result = normalizeWhitespace(text);
+
+  for (const [pattern, replacement] of PHONETIC_REPLACEMENTS) {
+    result = result.replace(pattern, replacement);
   }
 
-  if (profile.mlFocus?.label === 'polite' || profile.tone === 'formal' || profile.audience === 'customer') {
-    return softenText(base);
+  result = result
+    .replace(/\s+/g, ' ')
+    .replace(/\b(\w+)(?:\s+\1\b)+/gi, '$1')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+
+  return ensureSentenceEnding(result);
+}
+
+function applyContextCorrections(text) {
+  return normalizeWhitespace(text)
+    .replace(/\bplease\b/gi, '')
+    .replace(/\bcan you\b/gi, 'could you')
+    .replace(/\bcould you\b/gi, 'could you')
+    .replace(/\bneed to\b/gi, '해야 합니다')
+    .replace(/\bI need to\b/gi, '제가 해야 합니다')
+    .replace(/\blet's\b/gi, '함께')
+    .replace(/\bupdate\b/gi, '업데이트')
+    .replace(/\bfollow up\b/gi, '후속 확인')
+    .replace(/\bsend\b/gi, '보내')
+    .replace(/\breview\b/gi, '검토')
+    .replace(/\bcheck\b/gi, '확인')
+    .replace(/\breply\b/gi, '답장')
+    .replace(/\bhelp\b/gi, '도움')
+    .replace(/\bfix\b/gi, '수정')
+    .replace(/\bissue\b/gi, '문제')
+    .replace(/\bteam\b/gi, '팀')
+    .replace(/\bclient\b/gi, '고객')
+    .replace(/\bcustomer\b/gi, '고객')
+    .replace(/\bstatus\b/gi, '상태')
+    .replace(/\bsummary\b/gi, '요약')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+}
+
+function buildQuestionVariant(text) {
+  return ensureQuestionTone(applyContextCorrections(text));
+}
+
+function buildApologyVariant(text) {
+  return softenText(applyContextCorrections(text));
+}
+
+function buildUpdateVariant(text) {
+  return structureAsUpdate(applyContextCorrections(text));
+}
+
+function buildActionVariant(text) {
+  const base = normalizeWhitespace(text);
+  const lower = base.toLowerCase();
+
+  if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+    return '팀에 업데이트를 보내야 합니다.';
   }
 
-  return base;
+  if (/(follow up|후속).*(team|팀|client|고객)/i.test(lower)) {
+    return '팀과 후속 확인을 진행해야 합니다.';
+  }
+
+  if (/(need to|해야|할 일|action)/i.test(lower)) {
+    return `실행 계획: ${normalizeWhitespace(base)}`;
+  }
+
+  return makeActionable(applyContextCorrections(text));
+}
+
+function buildCombinedActionVariant(text) {
+  const base = normalizeWhitespace(text);
+  const lower = base.toLowerCase();
+
+  if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+    return '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다.';
+  }
+
+  if (/(follow up|후속).*(team|팀|client|고객)/i.test(lower)) {
+    return '팀과 후속 확인을 진행하고 결과를 공유해야 합니다.';
+  }
+
+  const action = buildActionVariant(text);
+  return action.startsWith('실행 계획:') ? action : `실행 계획: ${action}`;
 }
 
 function softenText(text) {
-  const base = simplifyText(text)
+  return normalizeWhitespace(text)
     .replace(/^i\s+need\s+to\b/i, "I'd appreciate it if we could")
     .replace(/^i\s+want\s+to\b/i, "I'd like to")
     .replace(/^i\s+can't\b/i, 'I may not be able to')
     .replace(/^i\s+cannot\b/i, 'I may not be able to')
     .replace(/\b(can't|cannot)\b/gi, 'may not be able to')
     .replace(/\bwant to\b/gi, 'would like to')
-    .replace(/\bneed to\b/gi, 'would appreciate it if we could');
-
-  if (/\?$/.test(base)) return base;
-  if (/[.!]$/.test(base)) return base;
-  return `${base}.`;
+    .replace(/\bneed to\b/gi, 'would appreciate it if we could')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
 }
 
-function tightenText(text) {
-  const result = simplifyText(text)
-    .replace(/\b(I think|maybe|perhaps|probably)\b/gi, '')
+function makeActionable(text) {
+  const result = normalizeWhitespace(text)
+    .replace(/^please\s+/i, '')
+    .replace(/\bwe should\b/gi, 'let’s')
+    .replace(/\bshould\b/gi, '해야 합니다')
+    .replace(/\bmust\b/gi, '반드시')
+    .replace(/\bcan you\b/gi, 'please')
+    .replace(/\bcould you\b/gi, 'please')
+    .replace(/\bfollow up\b/gi, '후속 확인')
+    .replace(/\bupdate\b/gi, '업데이트')
+    .replace(/\bsend\b/gi, '보내')
+    .replace(/\breview\b/gi, '검토')
+    .replace(/\bcheck\b/gi, '확인')
+    .replace(/\breply\b/gi, '답장')
+    .replace(/\bfix\b/gi, '수정')
+    .replace(/\bissue\b/gi, '문제')
+    .replace(/\bteam\b/gi, '팀')
+    .replace(/\bclient\b/gi, '고객')
+    .replace(/\bcustomer\b/gi, '고객')
     .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!?]$/, '');
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
 
-  return result || simplifyText(text);
-}
-
-function ensureQuestionTone(text) {
-  const base = simplifyText(text);
-  return /\?$/.test(base) ? base : `${base}?`;
+  const sentences = result.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length > 1) {
+    return `실행 계획:\n- ${sentences.join('\n- ')}`;
+  }
+  return `실행 계획: ${result}`;
 }
 
 function structureAsUpdate(text) {
-  const base = simplifyText(text);
+  const base = normalizeWhitespace(text);
   const sentences = base.split(/(?<=[.!?])\s+/).filter(Boolean);
   if (sentences.length > 1) {
     return `업데이트:\n- ${sentences.join('\n- ')}`;
@@ -251,41 +362,14 @@ function structureAsUpdate(text) {
   return `업데이트: ${base}`;
 }
 
-function makeActionable(text, profile) {
-  const base = simplifyText(text)
-    .replace(/^(please\s+)?/i, '')
-    .replace(/\bwe should\b/gi, 'let’s')
-    .replace(/\b(i need to|need to)\b/gi, 'next step:')
-    .replace(/\b(can you|could you)\b/gi, 'please');
-
-  if (profile.urgency === 'high') {
-    return `우선순위 높음: ${base}`;
-  }
-
-  const sentences = base.split(/(?<=[.!?])\s+/).filter(Boolean);
-  if (sentences.length > 1) {
-    return `실행 계획:\n- ${sentences.join('\n- ')}`;
-  }
-  return `실행 계획: ${base}`;
+function ensureQuestionTone(text) {
+  const base = normalizeWhitespace(text);
+  return /\?$/.test(base) ? base : `${base}?`;
 }
 
-function summaryNote(profile, fallback) {
-  const parts = [];
-  if (profile.channel !== 'general') parts.push(profile.channel);
-  if (profile.audience !== 'general') parts.push(profile.audience);
-  if (profile.tone !== 'neutral') parts.push(profile.tone);
-  if (profile.intent !== 'general') parts.push(profile.intent);
-  if (profile.urgency === 'high') parts.push('긴급');
-
-  const note = parts.length ? parts.join(' · ') : fallback;
-  return `맥락: ${note}`;
-}
-
-function finalizeVariantText(value) {
-  return String(value ?? '')
-    .split(/\n+/)
-    .map((line) => normalizeWhitespace(line))
-    .filter(Boolean)
-    .join('\n')
-    .trim();
+function ensureSentenceEnding(text) {
+  const base = normalizeWhitespace(text);
+  if (!base) return base;
+  if (/[.!?]$/.test(base)) return base;
+  return `${base}.`;
 }

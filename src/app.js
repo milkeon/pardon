@@ -1,4 +1,4 @@
-import { buildRemotePrompt, buildRewriteVariants, normalizeWhitespace } from './rewrite.js';
+import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -8,11 +8,8 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
-  context: document.querySelector('#context'),
-  apiKey: document.querySelector('#api-key'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
-  recordingBadge: document.querySelector('#recording-badge'),
   variantList: document.querySelector('#variant-list'),
   emptyState: document.querySelector('#variants-empty')
 };
@@ -26,7 +23,8 @@ const state = {
   interimTranscript: '',
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
-  variants: []
+  variants: [],
+  readyForVariants: false
 };
 
 initialize();
@@ -44,11 +42,11 @@ function wireEvents() {
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
   els.transcript.addEventListener('input', onTranscriptEdit);
-  els.context.addEventListener('input', () => renderVariants());
 }
 
 async function startCapture() {
   try {
+    clearSessionState();
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.chunks = [];
     state.recorder = new MediaRecorder(state.stream);
@@ -66,7 +64,7 @@ async function startCapture() {
     }
 
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 자연스럽게 말하면 원문 STT에 표시됩니다.');
+    setStatus('녹음을 시작했습니다. 들리는 즉시 STT 원문에 쌓습니다.');
   } catch (error) {
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
   }
@@ -94,20 +92,28 @@ function stopCapture() {
     state.stream = null;
   }
 
+  state.readyForVariants = true;
+  renderVariants();
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 현재 원문 기준으로 3가지 가능성이 갱신됩니다.');
+  setStatus('녹음을 종료했습니다. 음성 보정본, 맥락 보정본, 종합본을 만들었습니다.');
 }
 
 function clearAll() {
   stopCapture();
-  state.transcript = '';
-  state.interimTranscript = '';
-  state.chunks = [];
-  state.variants = [];
+  clearSessionState();
   setTranscript('');
   setAudioUrl('');
   renderVariants();
-  setStatus('원문, 오디오, 그리고 선택 상태를 초기화했습니다.');
+  setStatus('원문, 오디오, 선택 상태를 초기화했습니다.');
+}
+
+function clearSessionState() {
+  state.chunks = [];
+  state.transcript = '';
+  state.interimTranscript = '';
+  state.variants = [];
+  state.readyForVariants = false;
+  state.selectedVariantId = 'possibility-1';
 }
 
 function onChunk(event) {
@@ -137,14 +143,17 @@ function onRecognitionResult(event) {
 
   if (finalText) {
     state.transcript = normalizeWhitespace(`${state.transcript} ${finalText}`);
-    setTranscript(state.transcript + (interimText ? ` ${interimText}` : ''));
-    renderVariants();
-  } else if (interimText) {
-    state.interimTranscript = normalizeWhitespace(interimText);
-    setTranscript(normalizeWhitespace(`${state.transcript} ${state.interimTranscript}`));
   }
 
-  setStatus('음성을 듣고 STT로 변환하는 중입니다.');
+  state.interimTranscript = normalizeWhitespace(interimText);
+  const liveTranscript = normalizeWhitespace(`${state.transcript} ${state.interimTranscript}`);
+  setTranscript(liveTranscript);
+
+  if (state.readyForVariants) {
+    renderVariants();
+  }
+
+  setStatus('음성을 듣고 STT 원문을 즉시 쌓는 중입니다.');
 }
 
 function onRecognitionError(event) {
@@ -167,20 +176,33 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
-  renderVariants();
+  state.interimTranscript = '';
+  if (state.readyForVariants) {
+    renderVariants();
+  }
 }
 
 function renderVariants() {
   const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
-  const context = els.context.value;
-  const variants = buildRewriteVariants(transcript, context);
+
+  if (!state.readyForVariants || !transcript) {
+    state.variants = [];
+    els.variantList.innerHTML = '';
+    els.emptyState.hidden = false;
+    els.emptyState.textContent = state.readyForVariants
+      ? '원문이 비어 있어서 가능성을 만들 수 없습니다.'
+      : '정지하면 음성 보정본, 맥락 보정본, 종합본이 표시됩니다.';
+    return;
+  }
+
+  const variants = buildRewriteVariants(transcript);
   state.variants = variants;
   renderVariantCards(variants);
 }
 
 function renderVariantCards(variants) {
   els.variantList.innerHTML = '';
-  els.emptyState.hidden = normalizeWhitespace(els.transcript.value || state.transcript).length > 0;
+  els.emptyState.hidden = true;
 
   if (!variants.some((variant) => variant.id === state.selectedVariantId)) {
     state.selectedVariantId = variants[0]?.id || 'possibility-1';
@@ -203,44 +225,20 @@ function renderVariantCards(variants) {
   });
 }
 
-async function handleGenerateClicked() {
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
-  const context = els.context.value;
-  const apiKey = normalizeWhitespace(els.apiKey.value);
-
-  if (!transcript) {
-    setStatus('원문을 먼저 추가하거나 녹음한 뒤 재작성해 주세요.');
-    renderVariants();
-    return;
-  }
-
-  if (!apiKey) {
-    setStatus('브라우저 API 키가 없어서 로컬 ML + 규칙 기반 가능성 엔진을 사용합니다.');
-    renderVariants();
-    return;
-  }
-
-  els.generateButton.disabled = true;
-  setStatus('브라우저에 내장된 OpenAI와 로컬 ML 기반 문맥 신호로 가능성 3가지를 생성하는 중입니다...');
-
-  try {
-    const remoteVariants = await generateRemoteVariants({ transcript, context, apiKey });
-    state.variants = remoteVariants;
-    renderVariantCards(remoteVariants);
-    setStatus('OpenAI와 로컬 ML 문맥 신호로 가능성 3가지를 생성했습니다.');
-  } catch (error) {
-    state.variants = buildRewriteVariants(transcript, context);
-    renderVariantCards(state.variants);
-    setStatus(`원격 생성에 실패해서 로컬 ML + 규칙 기반 대체 엔진을 사용했습니다: ${friendlyError(error)}`);
-  } finally {
-    els.generateButton.disabled = false;
+function handleGenerateClicked() {
+  state.readyForVariants = true;
+  renderVariants();
+  if (state.transcript || els.transcript.value) {
+    setStatus('현재 원문 기준으로 3가지 가능성을 다시 계산했습니다.');
+  } else {
+    setStatus('먼저 원문이 있어야 가능성을 계산할 수 있습니다.');
   }
 }
 
 async function copySelectedVariant() {
   const variants = state.variants.length
     ? state.variants
-    : buildRewriteVariants(normalizeWhitespace(els.transcript.value || state.transcript), els.context.value);
+    : buildRewriteVariants(normalizeWhitespace(els.transcript.value || state.transcript));
   const selected = variants.find((variant) => variant.id === state.selectedVariantId) || variants[0];
 
   try {
@@ -265,72 +263,17 @@ function createSpeechRecognition() {
   return recognition;
 }
 
-async function generateRemoteVariants({ transcript, context, apiKey }) {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(buildRemotePrompt({ transcript, context }))
-  });
-
-  if (!response.ok) {
-    throw new Error(`원격 생성 요청이 실패했습니다 (${response.status})`);
-  }
-
-  const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  const parsed = parseJsonMaybe(content);
-  const localFallback = buildRewriteVariants(transcript, context);
-
-  return [
-    { id: 'possibility-1', label: '가능성 1', text: finalizeVariantText(parsed?.possibility1 || parsed?.possibility_1 || parsed?.one || '') || localFallback[0].text },
-    { id: 'possibility-2', label: '가능성 2', text: finalizeVariantText(parsed?.possibility2 || parsed?.possibility_2 || parsed?.two || '') || localFallback[1].text },
-    { id: 'possibility-3', label: '가능성 3', text: finalizeVariantText(parsed?.possibility3 || parsed?.possibility_3 || parsed?.three || '') || localFallback[2].text }
-  ];
-}
-
-function parseJsonMaybe(value) {
-  if (typeof value !== 'string') return value || null;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    const match = value.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      return null;
-    }
-  }
-}
-
-function finalizeVariantText(value) {
-  return String(value ?? '')
-    .split(/\n+/)
-    .map((line) => normalizeWhitespace(line))
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
 function updateSupportStatus() {
   const hasRecorder = typeof MediaRecorder !== 'undefined';
   const hasSpeechRecognition = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   els.supportStatus.textContent = [
     hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
-    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨',
-    '로컬 ML: Naive Bayes'
+    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨'
   ].join(' · ');
 }
 
 function setRecording(isRecording) {
-  els.recordingBadge.textContent = isRecording ? '● 녹음 중' : '대기 중';
-  els.recordingBadge.classList.toggle('is-recording', isRecording);
   els.startButton.disabled = isRecording;
   els.stopButton.disabled = !isRecording;
 }
