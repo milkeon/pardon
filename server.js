@@ -30,7 +30,7 @@ function resolvePath(urlPath) {
   const safeRelative = path
     .normalize(cleanPath)
     .replace(/^([.]{2}[\/\\])+/, '')
-    .replace(/^\//, '');
+    .replace(/^[\/\\]+/, '');
   const resolved = path.resolve(root, safeRelative || 'index.html');
   return resolved.toLowerCase().startsWith(root.toLowerCase()) ? resolved : null;
 }
