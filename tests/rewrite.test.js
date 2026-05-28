@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, inferContextHints, normalizeWhitespace } from '../src/rewrite.js';
+import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, guardRewriteVariant, inferContextHints, normalizeWhitespace } from '../src/rewrite.js';
 import { predictRewriteFocus } from '../src/ml.js';
 
 test('normalizeWhitespace는 과도한 공백을 정리한다', () => {
@@ -64,6 +64,20 @@ test('buildRewriteVariants는 원문이 비었을 때 안내 문구를 반환한
   const variants = buildRewriteVariants('');
   assert.equal(variants.length, 3);
   assert.ok(variants.every((variant) => variant.text.includes('정지하면')));
+});
+
+test('guardRewriteVariant는 원문과 너무 멀어진 후보를 되돌린다', () => {
+  const source = '이불도 배기덕질해';
+  const hallucinated = '이불과 배개 어쩌구 일 것 같은데 유의미하게 바뀌지 않음 아래쪽은 오히려 더 이상함';
+
+  assert.equal(guardRewriteVariant(source, hallucinated, source, 'strict'), '이불도 배기덕질해.');
+});
+
+test('guardRewriteVariant는 확실한 기술 용어 교정은 유지한다', () => {
+  const source = 'Please fix the redirect issue and send the update to the team.';
+  const candidate = '리다이렉트 문제를 수정하고 업데이트를 팀에 보내 주세요.';
+
+  assert.equal(guardRewriteVariant(source, candidate, source, 'strict'), '리다이렉트 문제를 수정하고 업데이트를 팀에 보내 주세요.');
 });
 
 test('buildRewriteVariants는 긴 문맥 입력을 실제로 재구성한다', () => {

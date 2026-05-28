@@ -41,6 +41,153 @@ export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const REWRITE_ANCHOR_RULES = [
+  { test: (sourceLower) => /\bfix\b/i.test(sourceLower), targets: ['수정'] },
+  { test: (sourceLower) => /\bredirect\b/i.test(sourceLower), targets: ['리다이렉트'] },
+  { test: (sourceLower) => /\bissue\b/i.test(sourceLower), targets: ['문제'] },
+  { test: (sourceLower) => /\bupdate\b/i.test(sourceLower), targets: ['업데이트'] },
+  { test: (sourceLower) => /\bsend\b/i.test(sourceLower), targets: ['보내', '전달'] },
+  { test: (sourceLower) => /\bteam\b/i.test(sourceLower), targets: ['팀'] },
+  { test: (sourceLower) => /\breview\b/i.test(sourceLower), targets: ['검토'] },
+  { test: (sourceLower) => /\bcheck\b/i.test(sourceLower), targets: ['확인'] },
+  { test: (sourceLower) => /\breply\b/i.test(sourceLower), targets: ['답장'] },
+  { test: (sourceLower) => /\bhelp\b/i.test(sourceLower), targets: ['도움'] },
+  { test: (sourceLower) => /\bclient\b/i.test(sourceLower), targets: ['고객'] },
+  { test: (sourceLower) => /\bcustomer\b/i.test(sourceLower), targets: ['고객'] },
+  { test: (sourceLower) => sourceLower.includes('리사이젝트') || sourceLower.includes('리젝트'), targets: ['리다이렉트'] },
+  { test: (sourceLower) => sourceLower.includes('자연 처리'), targets: ['자연어 처리'] },
+  { test: (sourceLower) => sourceLower.includes('구체적으로 해야 돼') || sourceLower.includes('구체적으로 해야돼'), targets: ['구체적으로 해야 합니다'] },
+  { test: (sourceLower) => sourceLower.includes('명확하게 해야 돼') || sourceLower.includes('명확하게 해야돼'), targets: ['명확하게 해야 합니다'] }
+];
+
+export function guardRewriteVariant(sourceText, candidateText, fallbackText, strictness = 'balanced') {
+  const source = normalizeWhitespace(sourceText);
+  const candidate = normalizeWhitespace(candidateText);
+  const fallback = normalizeWhitespace(fallbackText || source);
+
+  if (!candidate) {
+    return ensureSentenceEnding(fallback);
+  }
+
+  if (source && source === candidate) {
+    return ensureSentenceEnding(candidate);
+  }
+
+  if (!isLikelyRewriteVariant(source, candidate, strictness)) {
+    return ensureSentenceEnding(fallback);
+  }
+
+  return ensureSentenceEnding(candidate);
+}
+
+function isLikelyRewriteVariant(sourceText, candidateText, strictness = 'balanced') {
+  const source = normalizeWhitespace(sourceText);
+  const candidate = normalizeWhitespace(candidateText);
+  if (!source || !candidate) return false;
+
+  const sourceSignature = buildSimilaritySignature(source);
+  const candidateSignature = buildSimilaritySignature(candidate);
+  const charSimilarity = jaccardSimilarity(buildNgrams(sourceSignature, 2), buildNgrams(candidateSignature, 2));
+  const sourceTokens = buildContentTokenSet(source);
+  const candidateTokens = buildContentTokenSet(candidate);
+  const tokenOverlap = overlapRatio(sourceTokens, candidateTokens);
+  const anchorMatch = scoreRewriteAnchors(source, candidate);
+  const lengthRatio = candidateSignature.length / Math.max(1, sourceSignature.length);
+
+  const bounds = strictness === 'strict'
+    ? { min: 0.72, max: 1.3, similarity: 0.28, tokenOverlap: 0.18, anchorRatio: 0.34 }
+    : strictness === 'relaxed'
+      ? { min: 0.48, max: 1.65, similarity: 0.18, tokenOverlap: 0.12, anchorRatio: 0.22 }
+      : { min: 0.58, max: 1.45, similarity: 0.22, tokenOverlap: 0.15, anchorRatio: 0.28 };
+
+  if (anchorMatch.expected > 0 && anchorMatch.ratio >= bounds.anchorRatio) {
+    return lengthRatio >= 0.35 && lengthRatio <= 1.9;
+  }
+
+  if (lengthRatio < bounds.min || lengthRatio > bounds.max) {
+    return false;
+  }
+
+  if (sourceTokens.size <= 3) {
+    return charSimilarity >= Math.max(bounds.similarity, 0.28) && tokenOverlap >= 0.1;
+  }
+
+  return charSimilarity >= bounds.similarity && tokenOverlap >= bounds.tokenOverlap;
+}
+
+function scoreRewriteAnchors(sourceText, candidateText) {
+  const sourceLower = normalizeWhitespace(sourceText).toLowerCase();
+  const candidateLower = normalizeWhitespace(candidateText).toLowerCase();
+
+  let expected = 0;
+  let matched = 0;
+
+  for (const rule of REWRITE_ANCHOR_RULES) {
+    if (!rule.test(sourceLower)) {
+      continue;
+    }
+
+    expected += 1;
+    if (rule.targets.some((target) => candidateLower.includes(target.toLowerCase()))) {
+      matched += 1;
+    }
+  }
+
+  return {
+    expected,
+    matched,
+    ratio: expected ? matched / expected : 0
+  };
+}
+
+function buildSimilaritySignature(text) {
+  return normalizeWhitespace(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function buildNgrams(text, size) {
+  const source = String(text || '');
+  if (source.length < size) return new Set(source ? [source] : []);
+
+  const grams = new Set();
+  for (let index = 0; index <= source.length - size; index += 1) {
+    grams.add(source.slice(index, index + size));
+  }
+  return grams;
+}
+
+function jaccardSimilarity(left, right) {
+  if (!left.size && !right.size) return 0;
+  let shared = 0;
+  for (const item of left) {
+    if (right.has(item)) shared += 1;
+  }
+  const union = left.size + right.size - shared;
+  return union > 0 ? shared / union : 0;
+}
+
+function buildContentTokenSet(text) {
+  return new Set(
+    normalizeWhitespace(text)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .split(' ')
+      .filter((token) => token.length > 1 && !TRANSCRIPT_STOPWORDS.has(token))
+  );
+}
+
+function overlapRatio(sourceTokens, candidateTokens) {
+  if (!sourceTokens.size) return 0;
+
+  let shared = 0;
+  for (const token of sourceTokens) {
+    if (candidateTokens.has(token)) shared += 1;
+  }
+
+  return shared / sourceTokens.size;
+}
+
 export function deriveContextProfile(text = '') {
   const source = normalizeWhitespace(text).toLowerCase();
   const hints = inferContextHints(source);

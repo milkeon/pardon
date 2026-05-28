@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './src/rewrite.js';
+import { buildConfirmationSummary, buildRewriteVariants, guardRewriteVariant, normalizeWhitespace } from './src/rewrite.js';
 
 // 외부 의존성 없이 로컬 .env 파일의 환경변수를 process.env에 주입하는 초경량 수동 로더
 try {
@@ -253,8 +253,9 @@ async function callOpenAIRewriteVariants(transcript, hint) {
 브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음이나 띄어쓰기 오류로 깨져서 오인식되었을 수 있습니다.
 
 1단계는 STT 오인식 단어를 문맥에 맞는 실제 의도어로 교정하는 것입니다.
-예를 들어 "출장"처럼 엉뚱하게 받아진 단어는 문맥상 맞는 표현으로, "리사이젝트"처럼 발음이 깨진 단어는 "리다이렉트" 같은 실제 용어로 복원하십시오.
-2단계에서만 문장을 더 자연스럽게 정리하십시오.${hintBlock}
+불확실한 단어는 추측하지 말고 원문을 유지하십시오. 문맥 밖 명사나 과한 설명을 새로 만들지 마십시오.
+예를 들어 "리사이젝트"처럼 발음이 깨진 단어는 "리다이렉트" 같은 실제 용어로 복원할 수 있지만, 확실하지 않으면 그대로 두십시오.
+2단계에서만 문장을 더 자연스럽게 정리하십시오. 의미를 새로 만들거나 요약하지 말고, 원문의 뜻과 순서를 최대한 유지하십시오.${hintBlock}
 
 반환 양식은 아래의 3가지 대안을 지닌 엄격한 JSON 형태입니다. (키: v1, v2, v3)
 
@@ -269,7 +270,7 @@ async function callOpenAIRewriteVariants(transcript, hint) {
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      temperature: 0.35,
+      temperature: 0.15,
       responseFormat: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemContent },
@@ -278,10 +279,23 @@ async function callOpenAIRewriteVariants(transcript, hint) {
     });
 
     const parsed = JSON.parse(content);
+    const fallbackVariants = buildRewriteVariants(cleanFallback);
     return [
-      { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: parsed?.v1 || cleanFallback },
-      { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: parsed?.v2 || cleanFallback },
-      { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: parsed?.v3 || cleanFallback }
+      {
+        id: 'possibility-1',
+        label: '제안 1 · 오인식 보정',
+        text: guardRewriteVariant(cleanFallback, parsed?.v1, fallbackVariants[0]?.text || cleanFallback, 'strict')
+      },
+      {
+        id: 'possibility-2',
+        label: '제안 2 · 문맥 교정',
+        text: guardRewriteVariant(cleanFallback, parsed?.v2, fallbackVariants[1]?.text || cleanFallback, 'balanced')
+      },
+      {
+        id: 'possibility-3',
+        label: '제안 3 · 매끄러운 문장',
+        text: guardRewriteVariant(cleanFallback, parsed?.v3, fallbackVariants[2]?.text || cleanFallback, 'relaxed')
+      }
     ];
   } catch (error) {
     console.error('LLM 제안 생성 실패, 로컬 결정적 폴백 사용:', error);
