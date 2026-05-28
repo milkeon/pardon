@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-19';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=confirm-llm-19';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=confirm-llm-19';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-19';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-19';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-20';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=confirm-llm-20';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=confirm-llm-20';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-20';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-20';
 
 const testHooks = getTestHooks();
 
