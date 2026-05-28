@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-12';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-12';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-14';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-15';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-15';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-15';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-15';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-15';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -619,17 +619,22 @@ function updateSupportStatus() {
   els.supportStatus.textContent = [
     hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
     hasRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨',
+    '녹음 포맷: FLAC 우선 · 브라우저 호환 포맷 자동 선택',
     '파일 STT: STT 버튼으로 실행'
   ].join(' · ');
 }
 
-function getPreferredRecorderOptions() {
+function getPreferredRecorderMimeType() {
   if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
-    return null;
+    return '';
   }
 
-  const preferredTypes = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
-  const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type));
+  const preferredTypes = ['audio/flac', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  return preferredTypes.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function getPreferredRecorderOptions() {
+  const mimeType = getPreferredRecorderMimeType();
   return mimeType ? { mimeType } : null;
 }
 

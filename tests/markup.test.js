@@ -25,6 +25,7 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(appJs.includes('data-action="copy-variant"'));
   assert.ok(appJs.includes('data-action="transcribe-recording"'));
   assert.ok(appJs.includes('transcribeAudioBlob'));
+  assert.ok(appJs.includes('audio/flac'));
   assert.ok(html.includes('id="toast"'));
   assert.ok(html.includes('녹음이 진행되는 동안 실시간 받아쓰기 결과가 여기에 표시됩니다.'));
   assert.ok(html.includes('id="transcript"'));
@@ -34,5 +35,5 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=confirm-llm-14'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-15'));
 });
