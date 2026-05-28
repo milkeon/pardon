@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-17';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-17';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-17';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-17';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-17';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-18';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-18';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-18';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-18';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-18';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -122,7 +122,7 @@ async function startCapture() {
     state.recorder.addEventListener('stop', () => onRecorderStop(state.captureRevision));
     state.recorder.start(1000);
 
-    await startVoiceActivityMonitor();
+    void startVoiceActivityMonitor();
 
     const recognition = createSpeechRecognition();
     state.recognition = recognition;
@@ -814,43 +814,47 @@ function updateTranscribeButtonState() {
 async function startVoiceActivityMonitor() {
   cleanupAudioActivityMonitor();
 
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor || !state.stream) return;
+  try {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor || !state.stream) return;
 
-  state.audioContext = new AudioContextCtor();
-  if (state.audioContext.state === 'suspended') {
-    try {
-      await state.audioContext.resume();
-    } catch {
-      // ignore
+    state.audioContext = new AudioContextCtor();
+    if (state.audioContext.state === 'suspended') {
+      try {
+        await state.audioContext.resume();
+      } catch {
+        // ignore
+      }
     }
+
+    state.audioSource = state.audioContext.createMediaStreamSource(state.stream);
+    state.audioAnalyser = state.audioContext.createAnalyser();
+    state.audioAnalyser.fftSize = 2048;
+    state.audioSamples = new Float32Array(state.audioAnalyser.fftSize);
+    state.audioSource.connect(state.audioAnalyser);
+    state.lastVoiceAt = Date.now();
+
+    state.voiceMonitorTimer = window.setInterval(() => {
+      if (!state.recorder || state.recorder.state !== 'recording' || !state.audioAnalyser || !state.audioSamples) return;
+
+      state.audioAnalyser.getFloatTimeDomainData(state.audioSamples);
+      const level = calculateRms(state.audioSamples);
+      if (level >= VOICE_LEVEL_THRESHOLD) {
+        state.audioVoiceActive = true;
+        state.lastVoiceAt = Date.now();
+        return;
+      }
+
+      state.audioVoiceActive = false;
+
+      if (hasTimedOutSince(state.lastVoiceAt, Date.now(), SILENCE_TIMEOUT_MS)) {
+        stopCapture();
+        setStatus('1분 동안 무음이어서 자동으로 녹음을 종료했습니다.');
+      }
+    }, VOICE_CHECK_INTERVAL_MS);
+  } catch {
+    cleanupAudioActivityMonitor();
   }
-
-  state.audioSource = state.audioContext.createMediaStreamSource(state.stream);
-  state.audioAnalyser = state.audioContext.createAnalyser();
-  state.audioAnalyser.fftSize = 2048;
-  state.audioSamples = new Float32Array(state.audioAnalyser.fftSize);
-  state.audioSource.connect(state.audioAnalyser);
-  state.lastVoiceAt = Date.now();
-
-  state.voiceMonitorTimer = window.setInterval(() => {
-    if (!state.recorder || state.recorder.state !== 'recording' || !state.audioAnalyser || !state.audioSamples) return;
-
-    state.audioAnalyser.getFloatTimeDomainData(state.audioSamples);
-    const level = calculateRms(state.audioSamples);
-    if (level >= VOICE_LEVEL_THRESHOLD) {
-      state.audioVoiceActive = true;
-      state.lastVoiceAt = Date.now();
-      return;
-    }
-
-    state.audioVoiceActive = false;
-
-    if (hasTimedOutSince(state.lastVoiceAt, Date.now(), SILENCE_TIMEOUT_MS)) {
-      stopCapture();
-      setStatus('1분 동안 무음이어서 자동으로 녹음을 종료했습니다.');
-    }
-  }, VOICE_CHECK_INTERVAL_MS);
 }
 
 function cleanupAudioActivityMonitor() {
