@@ -101,7 +101,10 @@ async function startCapture() {
     state.captureRevision += 1;
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.chunks = [];
-    state.recorder = new MediaRecorder(state.stream);
+    const recorderOptions = getPreferredRecorderOptions();
+    state.recorder = recorderOptions
+      ? new MediaRecorder(state.stream, recorderOptions)
+      : new MediaRecorder(state.stream);
     state.recorder.addEventListener('dataavailable', onChunk);
     state.recorder.addEventListener('stop', () => onRecorderStop(state.captureRevision));
     state.recorder.start(1000);
@@ -224,7 +227,7 @@ function onRecorderStop(captureRevision) {
     return;
   }
 
-  const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || 'audio/webm' });
+  const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || getPreferredRecorderMimeType() || 'audio/webm' });
   state.recordedAudioBlob = blob;
   setAudioUrl(URL.createObjectURL(blob));
   updateTranscribeButtonState();
@@ -618,6 +621,16 @@ function updateSupportStatus() {
     hasRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨',
     '파일 STT: STT 버튼으로 실행'
   ].join(' · ');
+}
+
+function getPreferredRecorderOptions() {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return null;
+  }
+
+  const preferredTypes = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type));
+  return mimeType ? { mimeType } : null;
 }
 
 function setRecording(isRecording) {
