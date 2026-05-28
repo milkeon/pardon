@@ -1,8 +1,12 @@
-import { deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=confirm-llm-12';
+import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=confirm-llm-12';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 
 export async function fetchRewriteVariants(transcript) {
+  if (shouldUseStaticFallback()) {
+    return buildRewriteVariants(transcript);
+  }
+
   const payload = await postJson('/api/analyze', {
     transcript,
     hint: deriveContextProfile(transcript).hints.join(', ')
@@ -12,6 +16,13 @@ export async function fetchRewriteVariants(transcript) {
 }
 
 export async function fetchConfirmationSummary(selectedText, transcript) {
+  if (shouldUseStaticFallback()) {
+    return {
+      title: '확정 요약',
+      summary: buildConfirmationSummary(selectedText, transcript)
+    };
+  }
+
   const payload = await postJson('/api/summary', {
     transcript,
     selectedText,
@@ -80,4 +91,9 @@ function normalizeSummaryPayload(payload) {
   if (!summary) return null;
 
   return { title, summary };
+}
+
+function shouldUseStaticFallback() {
+  if (typeof location === 'undefined') return false;
+  return location.hostname.endsWith('github.io') || location.protocol === 'file:';
 }
