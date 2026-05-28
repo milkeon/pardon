@@ -1,9 +1,16 @@
 const TRANSCRIBE_MODEL = 'Xenova/whisper-base';
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+const DEFAULT_BATCH_SIZE = 15;
+const DEFAULT_CHUNK_LENGTH_SECONDS = 15;
 let transcriberPromise = null;
 
-export async function transcribeAudioBlob(blob) {
+export async function transcribeAudioBlob(blob, options = {}) {
   if (!(blob instanceof Blob) || blob.size === 0) return '';
+
+  const chunks = normalizeBlobChunks(options.chunks);
+  if (chunks.length > 0) {
+    return transcribeChunkBlobs(chunks, options);
+  }
 
   const audioData = await decodeAudioBlob(blob);
   if (!audioData?.length) return '';
@@ -11,11 +18,45 @@ export async function transcribeAudioBlob(blob) {
   const transcriber = await getTranscriber();
   const output = await transcriber(audioData, {
     task: 'transcribe',
-    chunk_length_s: 30,
+    chunk_length_s: normalizePositiveNumber(options.chunkLengthSeconds, DEFAULT_CHUNK_LENGTH_SECONDS),
     return_timestamps: false
   });
 
   return normalizeTranscript(output?.text || '');
+}
+
+async function transcribeChunkBlobs(chunks, options = {}) {
+  const transcriber = await getTranscriber();
+  const batchSize = normalizePositiveNumber(options.batchSize, DEFAULT_BATCH_SIZE);
+  const chunkLengthSeconds = normalizePositiveNumber(options.chunkLengthSeconds, DEFAULT_CHUNK_LENGTH_SECONDS);
+  const transcriptParts = [];
+  const totalBatches = Math.max(1, Math.ceil(chunks.length / batchSize));
+
+  for (let index = 0; index < chunks.length; index += batchSize) {
+    const currentBatch = Math.floor(index / batchSize) + 1;
+    if (typeof options.onProgress === 'function') {
+      options.onProgress({ currentBatch, totalBatches });
+    }
+
+    const batchAudio = await decodeAudioChunkBatch(chunks.slice(index, index + batchSize));
+    if (batchAudio?.length) {
+      const output = await transcriber(batchAudio, {
+        task: 'transcribe',
+        chunk_length_s: chunkLengthSeconds,
+        return_timestamps: false
+      });
+      const text = normalizeTranscript(output?.text || '');
+      if (text) transcriptParts.push(text);
+    }
+
+    await yieldToBrowser();
+  }
+
+  if (typeof options.onProgress === 'function') {
+    options.onProgress({ currentBatch: totalBatches, totalBatches });
+  }
+
+  return normalizeTranscript(transcriptParts.join(' '));
 }
 
 async function getTranscriber() {
@@ -31,6 +72,29 @@ async function getTranscriber() {
   }
 
   return transcriberPromise;
+}
+
+async function decodeAudioChunkBatch(chunks) {
+  const decodedChunks = [];
+  let totalLength = 0;
+
+  for (const chunk of chunks) {
+    const audioData = await decodeAudioBlob(chunk);
+    if (!audioData?.length) continue;
+    decodedChunks.push(audioData);
+    totalLength += audioData.length;
+  }
+
+  if (!totalLength) return null;
+
+  const merged = new Float32Array(totalLength);
+  let offset = 0;
+  for (const audioData of decodedChunks) {
+    merged.set(audioData, offset);
+    offset += audioData.length;
+  }
+
+  return merged;
 }
 
 async function decodeAudioBlob(blob) {
@@ -65,6 +129,16 @@ async function decodeAudioBlob(blob) {
   }
 }
 
+function normalizeBlobChunks(chunks) {
+  if (!Array.isArray(chunks)) return [];
+  return chunks.filter((chunk) => chunk instanceof Blob && chunk.size > 0);
+}
+
+function normalizePositiveNumber(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
 function createMonoBuffer(audioContext, decoded) {
   if (!decoded || !decoded.length) return null;
 
@@ -89,4 +163,8 @@ function createMonoBuffer(audioContext, decoded) {
 
 function normalizeTranscript(value) {
   return String(value ?? '').trim();
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
 }

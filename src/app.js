@@ -1,6 +1,6 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-10';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-10';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-10';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-11';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-11';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-11';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
@@ -244,7 +244,14 @@ async function handleTranscribeClicked() {
   renderVariantPlaceholder('녹음 파일 STT를 계산하는 중입니다. 잠시만 기다려 주세요.');
 
   try {
-    const rawTranscript = await transcribeAudioBlob(state.recordedAudioBlob);
+    const rawTranscript = await transcribeAudioBlob(state.recordedAudioBlob, {
+      chunks: state.chunks,
+      batchSize: 15,
+      chunkLengthSeconds: 15,
+      onProgress: ({ currentBatch, totalBatches }) => {
+        setStatus(`녹음 파일을 STT하는 중입니다. ${currentBatch}/${totalBatches} 청크를 처리 중입니다.`);
+      }
+    });
     const normalizedRaw = normalizeWhitespace(rawTranscript || '');
     const cleanedTranscript = normalizeWhitespace(buildRewriteVariants(normalizedRaw)[0]?.text || normalizedRaw);
 
