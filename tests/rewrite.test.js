@@ -50,6 +50,16 @@ test('buildRewriteVariants는 제안 1, 제안 2, 제안 3을 반환한다', () 
   assert.ok(new Set(variants.map((variant) => variant.text)).size >= 2);
 });
 
+test('buildRewriteVariants는 기술 설명 문맥에서 패션을 세션으로 교정한다', () => {
+  const variants = buildRewriteVariants('쿠키 세션 얘기하다가 중간에 패션이라고 잘못 들어갔는데 브라우저에서는 세션으로 관리해야 합니다.');
+
+  assert.equal(variants.length, 3);
+  assert.ok(variants[0].text.includes('세션'));
+  assert.ok(!variants[0].text.includes('패션'));
+  assert.ok(!variants[0].text.startsWith('실행 계획'));
+});
+
+
 test('buildRewriteVariants는 오인식 단어를 실제 용어로 교정한다', () => {
   const variants = buildRewriteVariants('Please fix the redirect issue and send the update to the team. 리사이젝트도 정리해 주세요.');
 

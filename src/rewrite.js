@@ -37,6 +37,9 @@ const TRANSCRIPT_STOPWORDS = new Set([
   '아마', '거의', '이미', '이제', '다시', '처음', '현재', '상황', '내용', '부분', '문장', '말', '것들', '여기', '저기'
 ]);
 
+const TECH_EXPLANATION_CONTEXT_RE = /(쿠키|세션|브라우저|서버|로그인|인증|토큰|식별자|캐시|스토리지|로컬스토리지|세션스토리지|cookie|session|browser|server|auth)/i;
+const TECH_EXPLANATION_CUE_RE = /(방식|원리|설명|예를 들어|그러면|그럼|때문에|그래서|저장|관리|요청|응답|데이터|위험|탈취|아이디|비밀번호)/i;
+
 export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
@@ -192,6 +195,7 @@ export function deriveContextProfile(text = '') {
   const source = normalizeWhitespace(text).toLowerCase();
   const hints = inferContextHints(source);
   const mlFocus = predictRewriteFocus(source);
+  const technicalExplanation = looksLikeTechnicalExplanation(source);
 
   let channel = /(email|mail|이메일)/i.test(source)
     ? 'email'
@@ -217,7 +221,7 @@ export function deriveContextProfile(text = '') {
     ? 'question'
     : /(sorry|apology|미안|사과)/i.test(source)
       ? 'apology'
-      : /(next step|action|해야|할 일|to do|todo|지금 처리|need to|have to|should|must|send|follow up|fix|review|check|update|resolve|finish)/i.test(source) && source.length < 180
+      : !technicalExplanation && /(next step|action|해야|할 일|to do|todo|지금 처리|need to|have to|should|must|send|follow up|fix|review|check|update|resolve|finish)/i.test(source) && source.length < 180
         ? 'action'
         : /(update|report|보고|status|상황|결과)/i.test(source)
           ? 'update'
@@ -231,9 +235,13 @@ export function deriveContextProfile(text = '') {
       if (tone === 'neutral') tone = 'casual';
       break;
     case 'action':
-      intent = 'action';
-      urgency = 'high';
-      if (channel === 'general') channel = 'chat';
+      if (!technicalExplanation) {
+        intent = 'action';
+        urgency = 'high';
+        if (channel === 'general') channel = 'chat';
+      } else if (intent === 'general') {
+        intent = 'summary';
+      }
       break;
     case 'summary':
       channel = 'report';
@@ -270,6 +278,12 @@ export function inferContextHints(text) {
   return hints.length ? [...new Set(hints)] : DEFAULT_HINTS;
 }
 
+function looksLikeTechnicalExplanation(text) {
+  const source = normalizeWhitespace(text).toLowerCase();
+  return TECH_EXPLANATION_CONTEXT_RE.test(source) && TECH_EXPLANATION_CUE_RE.test(source);
+}
+
+
 export function buildRewriteVariants(text) {
   const rawText = String(text ?? '');
   const cleanedText = normalizeWhitespace(rawText);
@@ -293,6 +307,10 @@ export function buildRewriteVariants(text) {
     ];
   }
 
+  if (looksLikeTechnicalExplanation(cleanedText)) {
+    return buildTechnicalExplanationRewriteVariants(rawText);
+  }
+
   const profile = deriveContextProfile(rawText);
   if (profile.intent === 'action') {
     return buildActionRewriteVariants(rawText, profile);
@@ -300,6 +318,69 @@ export function buildRewriteVariants(text) {
   const candidates = buildRewriteCandidatePool(rawText, profile);
   return selectRewriteVariants(rawText, profile, candidates);
 }
+
+function buildTechnicalExplanationRewriteVariants(text) {
+  const source = normalizeWhitespace(text);
+  const corrected = ensureSentenceEnding(
+    applyContextCorrections(
+      applyTranscriptCorrections(
+        cleanSpokenKorean(source)
+      )
+    )
+  );
+
+  const balanced = buildTechnicalExplanationBalancedVariant(source, corrected);
+  const relaxed = buildTechnicalExplanationRelaxedVariant(source, corrected);
+
+  return [
+    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: corrected },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: balanced },
+    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: relaxed }
+  ];
+}
+
+function buildTechnicalExplanationBalancedVariant(source, corrected) {
+  const hasCookieSession = /(쿠키|cookie)/i.test(source) && /(세션|session)/i.test(source);
+  const hasBrowser = /(브라우저|browser)/i.test(source);
+  const hasServer = /(서버|server)/i.test(source);
+
+  if (hasCookieSession && (hasBrowser || hasServer)) {
+    return ensureSentenceEnding('세션 방식은 브라우저에서 상태를 관리하는 방식입니다');
+  }
+
+  if (hasBrowser && /(세션|session)/i.test(source)) {
+    return ensureSentenceEnding('세션은 브라우저의 상태를 관리하는 방식입니다');
+  }
+
+  return ensureSentenceEnding(
+    normalizeWhitespace(corrected)
+      .replace(/쿠키\s*세션\s*얘기하다가\s*중간에\s*/g, '')
+      .replace(/중간에\s*세션이라고\s*잘못\s*들어갔는데\s*/g, '')
+      .replace(/\s+([,.!?;:])/g, '$1')
+  );
+}
+
+function buildTechnicalExplanationRelaxedVariant(source, corrected) {
+  const hasCookieSession = /(쿠키|cookie)/i.test(source) && /(세션|session)/i.test(source);
+  const hasBrowser = /(브라우저|browser)/i.test(source);
+  const hasServer = /(서버|server)/i.test(source);
+
+  if (hasCookieSession && (hasBrowser || hasServer)) {
+    return ensureSentenceEnding('브라우저는 세션으로 상태를 관리합니다');
+  }
+
+  if (hasBrowser && /(세션|session)/i.test(source)) {
+    return ensureSentenceEnding('브라우저는 세션을 사용해 상태를 관리합니다');
+  }
+
+  return ensureSentenceEnding(
+    normalizeWhitespace(corrected)
+      .replace(/쿠키\s*세션\s*얘기하다가\s*중간에\s*/g, '')
+      .replace(/중간에\s*세션이라고\s*잘못\s*들어갔는데\s*/g, '')
+      .replace(/\s+([,.!?;:])/g, '$1')
+  );
+}
+
 
 export function buildConfirmationSummary(text, sourceText = '') {
   const baseText = normalizeWhitespace(text);
@@ -445,6 +526,7 @@ function scoreRewriteCandidate(sourceText, candidateText, profile, mode) {
   const lengthBalance = 1 - Math.min(1, Math.abs(1 - lengthRatio));
   const compactness = Math.max(0, Math.min(1, candidate.length / Math.max(1, source.length)));
   const intentFit = scoreIntentFit(candidate, profile);
+  const technicalExplanation = looksLikeTechnicalExplanation(source);
 
   const weights = mode === 'strict'
     ? { similarity: 3.3, overlap: 2.4, anchor: 3.1, length: 1.9, intent: 0.8 }
@@ -458,6 +540,11 @@ function scoreRewriteCandidate(sourceText, candidateText, profile, mode) {
   score += anchorMatch.ratio * weights.anchor;
   score += lengthBalance * weights.length;
   score += intentFit * weights.intent;
+
+  if (technicalExplanation) {
+    if (/(세션|쿠키|브라우저|서버|식별자|아이디)/i.test(candidate)) score += 1.2;
+    if (/(패션|페션|선 방식)/i.test(candidate)) score -= 2.2;
+  }
 
   if (mode === 'strict') {
     if (lengthRatio < 0.55 || lengthRatio > 1.5) score -= 1.25;
@@ -943,6 +1030,7 @@ function scoreClause(clause, profile, structure) {
   const tokens = lowered.split(/\s+/).filter(Boolean);
   const contentTokens = tokens.filter((token) => token.length > 1 && !TRANSCRIPT_STOPWORDS.has(token));
   let score = contentTokens.length * 2;
+  const technicalExplanation = looksLikeTechnicalExplanation(structure.cleaned || clause);
 
   if (profile.intent === 'summary' && /(정리|요약|핵심|데이터|부족|문맥|상황|원인|결과|흐름)/i.test(lowered)) score += 6;
   if (profile.intent === 'question' && /(왜|어떻게|무엇|궁금|질문|알려)/i.test(lowered)) score += 6;
@@ -953,6 +1041,11 @@ function scoreClause(clause, profile, structure) {
   if (structure.fillerCount > 0) score += 1;
   if (/^(근데|그리고|그래서|다만|하지만|그런데)/.test(lowered)) score -= 1;
   if (contentTokens.length <= 2) score -= 2;
+
+  if (technicalExplanation) {
+    if (/(세션|쿠키|브라우저|서버|식별자|아이디)/i.test(lowered)) score += 2;
+    if (/(패션|페션|선 방식)/i.test(lowered)) score -= 2;
+  }
 
   return score;
 }
@@ -997,7 +1090,7 @@ function stripLeadingConnector(text) {
 }
 
 function applyTranscriptCorrections(text) {
-  return normalizeWhitespace(text)
+  return applyDomainContextCorrections(normalizeWhitespace(text))
     .replace(/상황으로 인지하고/g, '상황을 인지하고')
     .replace(/데이터가 부족해 가지고/g, '데이터가 부족해서')
     .replace(/부족해셔/g, '부족해서')
@@ -1018,7 +1111,7 @@ function applyPhoneticFixes(text) {
     result = result.replace(pattern, replacement);
   }
 
-  result = result
+  result = applyDomainContextCorrections(result)
     .replace(/\s+/g, ' ')
     .replace(/\b(\w+)(?:\s+\1\b)+/gi, '$1')
     .replace(/\s+([,.!?;:])/g, '$1')
@@ -1027,8 +1120,23 @@ function applyPhoneticFixes(text) {
   return ensureSentenceEnding(result);
 }
 
+function applyDomainContextCorrections(text) {
+  const source = normalizeWhitespace(text);
+  if (!source || !TECH_EXPLANATION_CONTEXT_RE.test(source) || !TECH_EXPLANATION_CUE_RE.test(source)) {
+    return source;
+  }
+
+  return source
+    .replace(/선 방식/g, '세션 방식')
+    .replace(/패션/g, '세션')
+    .replace(/페션/g, '세션')
+    .replace(/시 메/g, '시스템')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+}
+
 function applyContextCorrections(text) {
-  return normalizeWhitespace(text)
+  return applyDomainContextCorrections(normalizeWhitespace(text))
     .replace(/\bplease\b/gi, '')
     .replace(/\bfix the redirect issue and send the update to the team\b/gi, '리다이렉트 문제를 수정하고 업데이트를 팀에 보내 주세요')
     .replace(/\bfix the redirect issue\b/gi, '리다이렉트 문제를 수정해 주세요')
