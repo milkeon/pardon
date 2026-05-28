@@ -343,9 +343,16 @@ function buildTechnicalExplanationBalancedVariant(source, corrected) {
   const hasCookieSession = /(쿠키|cookie)/i.test(source) && /(세션|session)/i.test(source);
   const hasBrowser = /(브라우저|browser)/i.test(source);
   const hasServer = /(서버|server)/i.test(source);
+  const hasLoginRouterFlow = /(로그인|login)/i.test(source)
+    && /(서버|server)/i.test(source)
+    && /(요청|request|post|포스트|라우터|router)/i.test(source);
 
   if (hasCookieSession && (hasBrowser || hasServer)) {
     return ensureSentenceEnding('세션 방식은 브라우저에서 상태를 관리하는 방식입니다');
+  }
+
+  if (hasLoginRouterFlow) {
+    return ensureSentenceEnding('로그인 요청이 서버의 POST 라우터로 아직 연결되지 않았다는 뜻입니다');
   }
 
   if (hasBrowser && /(세션|session)/i.test(source)) {
@@ -364,9 +371,16 @@ function buildTechnicalExplanationRelaxedVariant(source, corrected) {
   const hasCookieSession = /(쿠키|cookie)/i.test(source) && /(세션|session)/i.test(source);
   const hasBrowser = /(브라우저|browser)/i.test(source);
   const hasServer = /(서버|server)/i.test(source);
+  const hasLoginRouterFlow = /(로그인|login)/i.test(source)
+    && /(서버|server)/i.test(source)
+    && /(요청|request|post|포스트|라우터|router)/i.test(source);
 
   if (hasCookieSession && (hasBrowser || hasServer)) {
     return ensureSentenceEnding('브라우저는 세션으로 상태를 관리합니다');
+  }
+
+  if (hasLoginRouterFlow) {
+    return ensureSentenceEnding('로그인 요청은 서버의 POST 라우터로 처리되도록 아직 구현이 더 필요합니다');
   }
 
   if (hasBrowser && /(세션|session)/i.test(source)) {
@@ -1130,6 +1144,9 @@ function applyDomainContextCorrections(text) {
     .replace(/선 방식/g, '세션 방식')
     .replace(/패션/g, '세션')
     .replace(/페션/g, '세션')
+    .replace(/메론가요/g, '뭔가요')
+    .replace(/타피/g, '카피')
+    .replace(/포스트/g, 'POST')
     .replace(/시 메/g, '시스템')
     .replace(/\s+([,.!?;:])/g, '$1')
     .trim();

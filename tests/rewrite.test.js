@@ -59,6 +59,17 @@ test('buildRewriteVariants는 기술 설명 문맥에서 패션을 세션으로 
   assert.ok(!variants[0].text.startsWith('실행 계획'));
 });
 
+test('buildRewriteVariants는 로그인/라우터 설명에서 메론가요와 타피를 실제 용어로 교정한다', () => {
+  const source = '예를 들어서 이제 전번 1111하고 자 로그인을 딱 누르면 자 메론가요 이거 서버에 지금 저 로그인이라는 요청으로 그 포스트 모양이 안 돼 있다는 뜻이죠 그래서 포스트 방식의 그 라우터가 아직 구현되지 않았다는 그런 의미입니다. 자 요거 그대로 타피 자 여기다가 붙여넣기 하는데 대신 액정 개시하느라 별로 포스트로만 바꿔 주면 되겠죠.';
+  const variants = buildRewriteVariants(source);
+
+  assert.equal(variants.length, 3);
+  assert.ok(new Set(variants.map((variant) => variant.text)).size >= 2);
+  assert.ok(variants.some((variant) => variant.text.includes('뭔가요') || variant.text.includes('카피') || variant.text.includes('POST')));
+  assert.ok(variants.every((variant) => !variant.text.includes('메론가요')));
+  assert.ok(variants.some((variant) => variant.text.includes('서버의 POST 라우터')));
+});
+
 
 test('buildRewriteVariants는 오인식 단어를 실제 용어로 교정한다', () => {
   const variants = buildRewriteVariants('Please fix the redirect issue and send the update to the team. 리사이젝트도 정리해 주세요.');
