@@ -33,5 +33,5 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=confirm-llm-8'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-9'));
 });
