@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-20';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=confirm-llm-20';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=confirm-llm-20';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-20';
-import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=confirm-llm-20';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=stt-linebreak-21';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=stt-linebreak-21';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-linebreak-21';
+import { mergeRecognitionResults } from './stt.js?v=stt-linebreak-21';
+import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-linebreak-21';
 
 const testHooks = getTestHooks();
 
