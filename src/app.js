@@ -1,8 +1,38 @@
 import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-19';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-19';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-19';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=confirm-llm-19';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=confirm-llm-19';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-19';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-19';
+
+const testHooks = getTestHooks();
+
+function getTestHooks() {
+  return typeof window !== 'undefined' ? window.__PARDON_TEST_HOOKS__ || null : null;
+}
+
+async function fetchRewriteVariants(transcript) {
+  if (typeof testHooks?.fetchRewriteVariants === 'function') {
+    return testHooks.fetchRewriteVariants(transcript);
+  }
+
+  return fetchRewriteVariantsImpl(transcript);
+}
+
+async function fetchConfirmationSummary(selectedText, transcript) {
+  if (typeof testHooks?.fetchConfirmationSummary === 'function') {
+    return testHooks.fetchConfirmationSummary(selectedText, transcript);
+  }
+
+  return fetchConfirmationSummaryImpl(selectedText, transcript);
+}
+
+async function transcribeAudioBlob(blob, options = {}) {
+  if (typeof testHooks?.transcribeAudioBlob === 'function') {
+    return testHooks.transcribeAudioBlob(blob, options);
+  }
+
+  return transcribeAudioBlobImpl(blob, options);
+}
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
