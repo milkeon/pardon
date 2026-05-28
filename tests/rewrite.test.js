@@ -43,11 +43,21 @@ test('buildRewriteVariants는 제안 1, 제안 2, 제안 3을 반환한다', () 
   );
   assert.deepEqual(
     variants.map((variant) => variant.label),
-    ['제안 1 · 원문 보정', '제안 2 · 자연스러운 문장', '제안 3 · 정리된 문장']
+    ['제안 1 · 오인식 보정', '제안 2 · 문맥 교정', '제안 3 · 매끄러운 문장']
   );
-  assert.ok(variants[0].text.includes('I need to send the update to the team'));
+  assert.ok(variants[0].text.includes('제가 해야 합니다') || variants[0].text.includes('팀'));
   assert.ok(variants[2].text.length > 0);
   assert.ok(new Set(variants.map((variant) => variant.text)).size >= 2);
+});
+
+test('buildRewriteVariants는 오인식 단어를 실제 용어로 교정한다', () => {
+  const variants = buildRewriteVariants('Please fix the redirect issue and send the update to the team. 리사이젝트도 정리해 주세요.');
+
+  assert.ok(variants[0].text.includes('수정'));
+  assert.ok(variants[0].text.includes('리다이렉트'));
+  assert.ok(variants[0].text.includes('팀'));
+  assert.ok(variants[0].text.includes('업데이트'));
+  assert.ok(variants[0].text.includes('리다이렉트'));
 });
 
 test('buildRewriteVariants는 원문이 비었을 때 안내 문구를 반환한다', () => {

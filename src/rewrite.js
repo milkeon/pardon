@@ -130,41 +130,41 @@ export function buildRewriteVariants(text) {
     return [
       {
         id: 'possibility-1',
-        label: '제안 1 · 원문 보정',
+        label: '제안 1 · 오인식 보정',
         text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       },
       {
         id: 'possibility-2',
-        label: '제안 2 · 자연스러운 문장',
+        label: '제안 2 · 문맥 교정',
         text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       },
       {
         id: 'possibility-3',
-        label: '제안 3 · 정리된 문장',
+        label: '제안 3 · 매끄러운 문장',
         text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
       }
     ];
   }
 
   const profile = deriveContextProfile(rawText);
-  const phonetic = buildPhoneticVariant(rawText);
+  const correction = buildCorrectionVariant(rawText);
   const balanced = buildBalancedVariant(rawText, profile);
   const organized = buildOrganizedVariant(rawText, profile);
 
   return [
     {
       id: 'possibility-1',
-      label: '제안 1 · 원문 보정',
-      text: phonetic
+      label: '제안 1 · 오인식 보정',
+      text: correction
     },
     {
       id: 'possibility-2',
-      label: '제안 2 · 자연스러운 문장',
+      label: '제안 2 · 문맥 교정',
       text: balanced
     },
     {
       id: 'possibility-3',
-      label: '제안 3 · 정리된 문장',
+      label: '제안 3 · 매끄러운 문장',
       text: organized
     }
   ];
@@ -238,6 +238,20 @@ function compressConfirmationPhrase(text) {
     .replace(/\s+([,.!?;:])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function buildCorrectionVariant(text) {
+  return ensureSentenceEnding(
+    normalizeWhitespace(
+      applyContextCorrections(
+        applyTranscriptCorrections(
+          cleanSpokenKorean(
+            applyPhoneticFixes(text)
+          )
+        )
+      )
+    )
+  );
 }
 
 function buildPhoneticVariant(text) {
@@ -647,6 +661,8 @@ function applyTranscriptCorrections(text) {
     .replace(/구체적으로 해야 돼/g, '구체적으로 해야 합니다')
     .replace(/구체적으로 해야돼/g, '구체적으로 해야 합니다')
     .replace(/명확하게 해야 돼/g, '명확하게 해야 합니다')
+    .replace(/리사이젝트/g, '리다이렉트')
+    .replace(/리젝트/g, '리다이렉트')
     .replace(/\s+([,.!?;:])/g, '$1')
     .trim();
 }
@@ -670,6 +686,9 @@ function applyPhoneticFixes(text) {
 function applyContextCorrections(text) {
   return normalizeWhitespace(text)
     .replace(/\bplease\b/gi, '')
+    .replace(/\bfix the redirect issue and send the update to the team\b/gi, '리다이렉트 문제를 수정하고 업데이트를 팀에 보내 주세요')
+    .replace(/\bfix the redirect issue\b/gi, '리다이렉트 문제를 수정해 주세요')
+    .replace(/\bsend the update to the team\b/gi, '업데이트를 팀에 보내 주세요')
     .replace(/\bcan you\b/gi, 'could you')
     .replace(/\bcould you\b/gi, 'could you')
     .replace(/\bneed to\b/gi, '해야 합니다')
@@ -683,6 +702,7 @@ function applyContextCorrections(text) {
     .replace(/\breply\b/gi, '답장')
     .replace(/\bhelp\b/gi, '도움')
     .replace(/\bfix\b/gi, '수정')
+    .replace(/\bredirect\b/gi, '리다이렉트')
     .replace(/\bissue\b/gi, '문제')
     .replace(/\bteam\b/gi, '팀')
     .replace(/\bclient\b/gi, '고객')

@@ -1,7 +1,7 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-3';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-3';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-3';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-3';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-4';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-4';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-4';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-4';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),

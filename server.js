@@ -244,20 +244,23 @@ async function callOpenAIRewriteVariants(transcript, hint) {
     return buildRewriteVariants(cleanFallback);
   }
 
+  const hintBlock = hint
+    ? `
+[중요 주제/용어 힌트 적용]: "${hint}"
+위 힌트 주제와 부합하는 기술 용어와 문맥을 살려 복원하십시오.`
+    : '';
   const systemContent = `화자는 한국어와 영어를 수시로 혼용하는 IT 엔지니어/개발자입니다.
 브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음이나 띄어쓰기 오류로 깨져서 오인식되었을 수 있습니다.
 
-[분석 핵심 임무]
-입력된 원문에서 오인식된 단어와 군더더기를 정리하되, 원문 의미를 바꾸지 말고 자연스러운 문장으로 복원하십시오.
-
-${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
-위 힌트 주제와 부합하는 기술 용어와 문맥을 살려 복원하십시오.` : ''}
+1단계는 STT 오인식 단어를 문맥에 맞는 실제 의도어로 교정하는 것입니다.
+예를 들어 "출장"처럼 엉뚱하게 받아진 단어는 문맥상 맞는 표현으로, "리사이젝트"처럼 발음이 깨진 단어는 "리다이렉트" 같은 실제 용어로 복원하십시오.
+2단계에서만 문장을 더 자연스럽게 정리하십시오.${hintBlock}
 
 반환 양식은 아래의 3가지 대안을 지닌 엄격한 JSON 형태입니다. (키: v1, v2, v3)
 
-- v1: 원래 문장 구조를 최대한 유지하면서 발음 오류와 오타만 최소 수정한 원문 보정
+- v1: 오인식된 단어를 먼저 교정한 보정본
 - v2: 문맥을 살려 더 자연스럽고 읽기 편하게 다시 쓴 문장
-- v3: 핵심 의미까지 정리한 가장 깔끔한 최종본
+- v3: 핵심 의미까지 정리한 가장 매끄러운 최종본
 
 설명은 절대로 덧붙이지 말고 오직 JSON(v1, v2, v3)만 리턴하십시오.`;
 
@@ -276,9 +279,9 @@ ${hint ? `[중요 주제/용어 힌트 적용]: "${hint}"
 
     const parsed = JSON.parse(content);
     return [
-      { id: 'possibility-1', label: '제안 1 · 원문 보정', text: parsed?.v1 || cleanFallback },
-      { id: 'possibility-2', label: '제안 2 · 자연스러운 문장', text: parsed?.v2 || cleanFallback },
-      { id: 'possibility-3', label: '제안 3 · 정리된 문장', text: parsed?.v3 || cleanFallback }
+      { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: parsed?.v1 || cleanFallback },
+      { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: parsed?.v2 || cleanFallback },
+      { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: parsed?.v3 || cleanFallback }
     ];
   } catch (error) {
     console.error('LLM 제안 생성 실패, 로컬 결정적 폴백 사용:', error);
