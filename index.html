@@ -6,7 +6,7 @@
     <meta name="description" content="Pardon은 녹음 파일 STT를 버튼으로 실행하고, 원문 STT와 정리본을 비교해 클릭으로 선택하는 정적 브라우저 앱입니다." />
     <title>Pardon</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./src/app.js?v=confirm-llm-15"></script>
+    <script type="module" src="./src/app.js?v=confirm-llm-16"></script>
   </head>
   <body>
     <main class="shell">
@@ -39,6 +39,10 @@
             <div class="audio-box__row">
               <audio id="audio-playback" controls hidden></audio>
               <button class="button button--primary button--small" type="button" data-action="transcribe-recording" disabled>STT</button>
+            </div>
+            <div class="audio-transcript">
+              <span>녹음 STT 결과</span>
+              <pre id="recorded-transcript" class="audio-transcript__text empty-state">STT 버튼을 누르면 녹음 STT가 아래에 표시됩니다.</pre>
             </div>
           </div>
           <section class="transcript-comparison">

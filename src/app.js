@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-15';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-15';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-15';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-15';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-15';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-16';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-16';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-16';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-16';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-16';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -14,6 +14,7 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcriptStatus: document.querySelector('#transcript-status'),
   transcriptComparisonStatus: document.querySelector('#transcript-comparison-status'),
+  recordedTranscript: document.querySelector('#recorded-transcript'),
   comparisonRaw: document.querySelector('#comparison-raw'),
   comparisonRecorded: document.querySelector('#comparison-recorded'),
   comparisonDiff: document.querySelector('#comparison-diff'),
@@ -76,9 +77,21 @@ function initialize() {
   updateSupportStatus();
   renderVariants();
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
+  renderRecordedTranscript();
   renderTranscriptComparison();
   setActionControlsDisabled(false);
   wireEvents();
+}
+
+function renderRecordedTranscript() {
+  if (!els.recordedTranscript) return;
+
+  const transcriptText = normalizeWhitespace(state.cleanedTranscript || state.rawTranscript);
+  const hasTranscript = Boolean(transcriptText);
+  els.recordedTranscript.classList.toggle('empty-state', !hasTranscript);
+  els.recordedTranscript.textContent = hasTranscript
+    ? transcriptText
+    : 'STT 버튼을 누르면 녹음 STT가 아래에 표시됩니다.';
 }
 
 function wireEvents() {
@@ -162,6 +175,7 @@ function stopCapture() {
   state.isTranscribing = false;
   state.recordedAudioBlob = null;
   renderVariantPlaceholder('정지하면 오디오 옆 STT 버튼으로 파일 전사를 시작할 수 있습니다.');
+  renderRecordedTranscript();
   renderTranscriptComparison();
   setRecording(false);
   updateTranscribeButtonState();
@@ -175,6 +189,7 @@ function clearAll() {
   clearSessionState();
   setTranscript('');
   setAudioUrl('');
+  renderRecordedTranscript();
   renderVariantPlaceholder('STT 버튼을 눌러 원문과 녹음 STT를 비교하세요.');
   setStatus('원문, 오디오, 선택 상태를 초기화했습니다.');
 }
@@ -206,6 +221,7 @@ function clearSessionState() {
   }
   setAudioUrl('');
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
+  renderRecordedTranscript();
   renderTranscriptComparison();
 }
 
@@ -264,14 +280,16 @@ async function handleTranscribeClicked() {
     state.selectedTranscriptSource = state.transcriptComparison.changedCount === 0 ? 'raw' : 'cleaned';
     state.readyForVariants = Boolean(normalizeWhitespace(getRewriteSourceText()));
 
+    renderRecordedTranscript();
     renderTranscriptComparison();
     renderVariantPlaceholder(state.readyForVariants ? '원문 STT 또는 녹음 STT를 선택한 뒤 변환하세요.' : '녹음 파일 STT가 비어 있습니다. 다시 시도해 주세요.');
-    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 원문 STT와 녹음 STT를 클릭해서 선택하세요.' : '녹음 파일 STT 결과가 비어 있습니다.');
+    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 아래 녹음 STT 결과와 비교 카드가 함께 표시됩니다.' : '녹음 파일 STT 결과가 비어 있습니다.');
   } catch (error) {
     state.rawTranscript = '';
     state.cleanedTranscript = '';
     state.transcriptComparison = null;
     state.selectedTranscriptSource = 'cleaned';
+    renderRecordedTranscript();
     renderTranscriptComparison();
     renderVariantPlaceholder('녹음 파일 STT에 실패했습니다.');
     setStatus(`녹음 파일 STT에 실패했습니다: ${friendlyError(error)}`);
