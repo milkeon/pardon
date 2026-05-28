@@ -1,4 +1,4 @@
-const TRANSCRIBE_MODEL = 'Xenova/whisper-base';
+const TRANSCRIBE_MODEL = 'Xenova/whisper-tiny';
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 const DEFAULT_BATCH_SIZE = 15;
 const DEFAULT_CHUNK_LENGTH_SECONDS = 15;
