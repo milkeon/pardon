@@ -1,5 +1,5 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-5';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-5';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-6';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-6';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
@@ -454,8 +454,7 @@ async function confirmVariant(variant) {
     const remoteSummary = await fetchConfirmationSummary(selected.text, transcript);
     const localSummary = buildConfirmationSummary(selected.text, transcript);
     const remoteSummaryText = normalizeWhitespace(remoteSummary?.summary || '');
-    const selectedText = normalizeWhitespace(selected.text);
-    const summaryText = remoteSummaryText && remoteSummaryText !== selectedText ? remoteSummaryText : localSummary;
+    const summaryText = chooseConfirmationSummary(remoteSummaryText, localSummary, selected.text, transcript);
     renderConfirmedSummary(summaryText, selected.label);
     setStatus('확정한 제안을 아래에 더 짧게 정리해서 보여줍니다.');
     renderVariantCards(state.variants.length ? state.variants : buildRewriteVariants(transcript));
@@ -549,6 +548,35 @@ function renderConfirmedSummary(summaryText, sourceLabel) {
   els.confirmedSummary.innerHTML = hasSummary
     ? `<p class="confirmed-summary__label">확정 요약</p><p class="confirmed-summary__text">${escapeHtml(content)}</p>`
     : escapeHtml(content);
+}
+
+function chooseConfirmationSummary(remoteSummaryText, localSummary, selectedText, transcript) {
+  const remote = normalizeWhitespace(remoteSummaryText);
+  const local = normalizeWhitespace(localSummary);
+  const selected = normalizeWhitespace(selectedText);
+  const source = normalizeWhitespace(transcript);
+
+  if (!remote) {
+    return local;
+  }
+
+  if (!local) {
+    return remote;
+  }
+
+  if (remote === selected) {
+    return local;
+  }
+
+  const remoteSentenceCount = remote.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+  const remoteTooLong = remote.length >= local.length || (source && remote.length >= Math.floor(source.length * 0.6));
+  const remoteTooBroad = remoteSentenceCount > 1 && source && remote.length >= Math.floor(source.length * 0.4);
+
+  if (remoteTooLong || remoteTooBroad) {
+    return local;
+  }
+
+  return remote;
 }
 
 function setActionControlsDisabled(isBusy) {

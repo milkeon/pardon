@@ -111,14 +111,15 @@ test('buildRewriteVariants는 긴 문맥 입력을 실제로 재구성한다', (
   assert.ok(!/^(핵심은|그리고|정리하면|정리해 보면)\b/.test(variants[2].text));
 });
 
-test('buildConfirmationSummary는 확정 내용을 원문보다 짧게 정리한다', () => {
-  const source = '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다. 오늘 안에 확인도 필요합니다.';
-  const summary = buildConfirmationSummary(source);
+test('buildConfirmationSummary는 긴 원문을 붙여도 짧은 확정 요약을 유지한다', () => {
+  const selected = '브라우저는 세션을 사용하는 상태를 관리하는 방식입니다.';
+  const source = '이름의 섹션에 우리가요 리퀘스트 좀 바디를 이렇게 추가하도록 하겠습니다 자 그러면 이때 이때 보면 새로운 로그인이 있다고 전화 한번 찍어 보세요 그러니까 최초의 최초에 한번 로그인을 했을 때 세션 정보가 일단 들어갈 거고 그러면 이제 내가 두 번째 만약에 최초의 로그인이고 내가 이제 뭐 예를 들어서 뭐 브라우저로 갔다가 다시 만약에 로그인 페이지를 요청을 하게 되면은 그때 이제 엑삭하겠지 어이 POST가 아니라 이번에는 백반집에 로그인 찾아야 될 건데 자 이때 얘는 지금 이게 첫 번째 첫 번째로 모이면이 아니라 이미 로그인된 상태인지 알 수가 없어.';
+  const summary = buildConfirmationSummary(selected, source);
 
   assert.ok(summary.length > 0);
   assert.ok(summary.length < source.length);
   assert.notEqual(summary, normalizeWhitespace(source));
-  assert.ok(summary.includes('팀에 업데이트') || summary.includes('진행 상황'));
-  assert.ok(!summary.includes('오늘 안에 확인도 필요합니다'));
+  assert.ok(!summary.includes('이름의 섹션에 우리가요 리퀘스트'));
+  assert.ok(summary.includes('브라우저') || summary.includes('세션'));
 });
 

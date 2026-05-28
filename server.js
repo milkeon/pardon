@@ -318,8 +318,9 @@ async function callOpenAISummary(transcript, selectedText, hint) {
     };
   }
 
-  const systemContent = `입력된 문장을 아래쪽에 표시할 1~2문장 요약으로 압축하십시오.
-원문을 그대로 반복하지 말고, 확정된 문장의 핵심을 짧고 자연스럽게 정리하십시오.
+  const systemContent = `입력 JSON의 selectedText를 아래쪽에 표시할 1~2문장 요약으로 압축하십시오.
+transcript는 의미 보존을 위한 참고 문맥일 뿐이며, 최종 요약은 selectedText보다 짧아야 합니다.
+원문을 그대로 반복하지 말고, 확정된 문장의 핵심만 아주 짧고 자연스럽게 정리하십시오.
 반환 양식은 엄격한 JSON 형태입니다. (키: title, summary)
 설명은 절대로 덧붙이지 말고 오직 JSON만 리턴하십시오.`;
 

@@ -402,19 +402,61 @@ export function buildConfirmationSummary(text, sourceText = '') {
     return '확정한 내용을 요약할 수 없습니다.';
   }
 
-  const profile = deriveContextProfile(sourceText || text);
-  const structure = analyzeTranscriptStructure(sourceText || text, profile);
-  const summary = buildConfirmationDigest(baseText, profile, structure, sourceText || text);
-  if (summary && normalizeWhitespace(summary) !== baseText) {
-    return summary;
-  }
+  const source = normalizeWhitespace(sourceText || text);
+  const profile = deriveContextProfile(source);
+  const structure = analyzeTranscriptStructure(source, profile);
+  const summary = buildConfirmationDigest(baseText, profile, structure, source);
+  const polished = buildSummaryVariant(source, profile, structure);
+  const compacted = compactConfirmationSummary(summary || polished || baseText, baseText, source);
 
-  const polished = buildSummaryVariant(sourceText || text, profile, structure);
-  if (polished && normalizeWhitespace(polished) !== baseText) {
-    return polished;
+  if (compacted) {
+    return compacted;
   }
 
   return compressConfirmationPhrase(baseText);
+}
+
+function compactConfirmationSummary(candidate, baseText, sourceText) {
+  const source = normalizeWhitespace(sourceText);
+  const base = normalizeWhitespace(baseText);
+  let result = normalizeWhitespace(candidate || base);
+
+  if (!result) {
+    return '';
+  }
+
+  result = result.split(/(?<=[.!?])\s+/)[0] || result;
+  result = compressConfirmationPhrase(result) || compressConfirmationPhrase(base);
+
+  if (!result) {
+    return '';
+  }
+
+  const sourceLimit = source ? Math.max(18, Math.floor(source.length * 0.6)) : Infinity;
+  const baseLimit = base ? Math.max(14, Math.floor(base.length * 0.9)) : Infinity;
+
+  if (source && result.length >= sourceLimit) {
+    const fallback = compressConfirmationPhrase(base);
+    if (fallback && fallback.length < result.length) {
+      result = fallback;
+    }
+  }
+
+  if (base && result.length >= baseLimit) {
+    const fallback = compressConfirmationPhrase(base);
+    if (fallback && fallback.length <= result.length) {
+      result = fallback;
+    }
+  }
+
+  if (source && result.length >= source.length) {
+    const fallback = compressConfirmationPhrase(base);
+    if (fallback && fallback.length < result.length) {
+      result = fallback;
+    }
+  }
+
+  return ensureSentenceEnding(result);
 }
 
 function buildConfirmationDigest(baseText, profile, structure, sourceText) {
