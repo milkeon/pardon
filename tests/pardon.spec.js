@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const fakeTranscript = '쿠키 세션은 브라우저 상태를 관리합니다.';
+const fakeTranscript = '쿠키 세션은\n브라우저 상태를 관리합니다.';
 const fakeVariants = [
   {
     id: 'possibility-1',
@@ -172,6 +172,8 @@ test('Pardon은 녹음 → 정지 → STT → 변환 → 확정 흐름을 테스
 
   await sttButton.click();
   await expect(page.locator('#recorded-transcript')).toHaveText(fakeTranscript);
+  await expect(page.locator('#comparison-recorded .transcript-surface__text')).toHaveText(fakeTranscript);
+
 
   await page.getByRole('button', { name: '변환' }).click();
   await expect(page.getByText('제안 1 · 오인식 보정')).toBeVisible();

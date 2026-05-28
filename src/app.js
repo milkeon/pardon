@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=stt-linebreak-21';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=stt-linebreak-21';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-linebreak-21';
-import { mergeRecognitionResults } from './stt.js?v=stt-linebreak-21';
-import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-linebreak-21';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=stt-linebreak-22';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=stt-linebreak-22';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-linebreak-22';
+import { mergeRecognitionResults } from './stt.js?v=stt-linebreak-22';
+import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-linebreak-22';
 
 const testHooks = getTestHooks();
 
@@ -116,7 +116,7 @@ function initialize() {
 function renderRecordedTranscript() {
   if (!els.recordedTranscript) return;
 
-  const transcriptText = normalizeWhitespace(state.rawTranscript);
+  const transcriptText = String(state.rawTranscript ?? '');
   const hasTranscript = Boolean(transcriptText);
   els.recordedTranscript.classList.toggle('empty-state', !hasTranscript);
   els.recordedTranscript.textContent = hasTranscript
@@ -301,7 +301,7 @@ async function handleTranscribeClicked() {
         setStatus(`녹음 파일을 STT하는 중입니다. ${currentBatch}/${totalBatches} 청크를 처리 중입니다.`);
       }
     });
-    const normalizedRaw = normalizeWhitespace(rawTranscript || '');
+    const normalizedRaw = String(rawTranscript || '');
     const cleanedTranscript = normalizeWhitespace(buildRewriteVariants(normalizedRaw)[0]?.text || normalizedRaw);
 
     state.rawTranscript = normalizedRaw;
