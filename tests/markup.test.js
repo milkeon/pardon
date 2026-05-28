@@ -19,8 +19,9 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(!html.includes('data-action="confirm"'));
   assert.ok(appJs.includes('data-action="confirm-variant"'));
   assert.ok(appJs.includes('data-action="copy-variant"'));
+  assert.ok(appJs.includes('transcribeAudioBlob'));
   assert.ok(html.includes('id="toast"'));
-  assert.ok(html.includes('spellcheck="false"'));
+  assert.ok(html.includes('녹음이 끝나면 STT 결과가 여기에 표시됩니다. 직접 붙여넣어도 됩니다.'));
   assert.ok(html.includes('autocorrect="off"'));
   assert.ok(!html.includes('문맥 힌트'));
   assert.ok(!html.includes('다시 생성'));
@@ -30,5 +31,5 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=confirm-llm-6'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-7'));
 });

@@ -1,4 +1,4 @@
-import { deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=confirm-llm-6';
+import { deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=confirm-llm-7';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 

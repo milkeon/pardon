@@ -1,5 +1,6 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-6';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-6';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-7';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-7';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-7';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
@@ -32,6 +33,7 @@ const state = {
   transcript: '',
   recognitionSegments: [],
   recognitionCommittedTranscript: '',
+  liveTranscriptBackup: '',
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
@@ -39,6 +41,8 @@ const state = {
   readyForVariants: false,
   lastVoiceAt: 0,
   isStopping: false,
+  isTranscribing: false,
+  captureRevision: 0,
   voiceMonitorTimer: null,
   recognitionRestartTimer: null,
   toastTimer: null,
@@ -76,11 +80,14 @@ async function startCapture() {
   try {
     clearSessionState();
     state.isStopping = false;
+    state.isTranscribing = false;
+    state.captureRevision += 1;
+    const captureRevision = state.captureRevision;
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.chunks = [];
     state.recorder = new MediaRecorder(state.stream);
     state.recorder.addEventListener('dataavailable', onChunk);
-    state.recorder.addEventListener('stop', onRecorderStop);
+    state.recorder.addEventListener('stop', () => onRecorderStop(captureRevision));
     state.recorder.start(1000);
 
     await startVoiceActivityMonitor();
@@ -95,7 +102,7 @@ async function startCapture() {
     }
 
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 음성이 들어오는 동안 STT를 계속 듣고, 1분 무음이면 자동 종료합니다.');
+    setStatus('녹음을 시작했습니다. 정지하면 녹음 파일을 STT로 다시 읽어서 원문을 만듭니다.');
   } catch (error) {
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
     cleanupAudioActivityMonitor();
@@ -131,16 +138,18 @@ function stopCapture() {
     state.stream = null;
   }
 
-  state.readyForVariants = true;
+  state.readyForVariants = false;
   state.variants = [];
-  renderVariantPlaceholder('정지했습니다. 변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
+  state.isTranscribing = true;
+  renderVariantPlaceholder('녹음 파일을 STT로 다시 읽는 중입니다. 잠시만 기다려 주세요.');
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.');
+  setStatus('녹음을 종료했습니다. 녹음 파일을 STT로 다시 읽는 중입니다.');
   state.isStopping = false;
 }
 
 function clearAll() {
   stopCapture();
+  state.captureRevision += 1;
   clearSessionState();
   setTranscript('');
   setAudioUrl('');
@@ -153,6 +162,7 @@ function clearSessionState() {
   state.transcript = '';
   state.recognitionSegments = [];
   state.recognitionCommittedTranscript = '';
+  state.liveTranscriptBackup = '';
   state.variants = [];
   state.confirmedSummary = '';
   state.readyForVariants = false;
@@ -169,10 +179,62 @@ function onChunk(event) {
   }
 }
 
-function onRecorderStop() {
-  if (!state.chunks.length) return;
+function onRecorderStop(captureRevision) {
+  if (captureRevision !== state.captureRevision) {
+    state.isTranscribing = false;
+    return;
+  }
+
+  if (!state.chunks.length) {
+    state.isTranscribing = false;
+    state.readyForVariants = Boolean(normalizeWhitespace(state.liveTranscriptBackup || state.transcript));
+    return;
+  }
+
   const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || 'audio/webm' });
   setAudioUrl(URL.createObjectURL(blob));
+
+  void (async () => {
+    try {
+      const recordedTranscript = await transcribeAudioBlob(blob);
+      if (captureRevision !== state.captureRevision) {
+        return;
+      }
+
+      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptBackup || state.transcript);
+      const finalTranscript = normalizeWhitespace(recordedTranscript) || fallbackTranscript;
+
+      if (finalTranscript) {
+        setTranscript(finalTranscript);
+        state.recognitionSegments = [{ transcript: finalTranscript, isFinal: true }];
+        state.recognitionCommittedTranscript = finalTranscript;
+      }
+
+      state.readyForVariants = Boolean(finalTranscript);
+      renderVariantPlaceholder(finalTranscript ? '녹음 파일 STT가 끝났습니다. 변환 버튼을 누르면 3가지 결과를 만듭니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
+      setStatus(finalTranscript ? '녹음 파일 기준 STT가 끝났습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.' : '녹음 파일 STT에 실패했습니다. 원문을 다시 확인해 주세요.');
+    } catch (error) {
+      if (captureRevision !== state.captureRevision) {
+        return;
+      }
+
+      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptBackup || state.transcript);
+      if (fallbackTranscript) {
+        setTranscript(fallbackTranscript);
+        state.recognitionSegments = [{ transcript: fallbackTranscript, isFinal: true }];
+        state.recognitionCommittedTranscript = fallbackTranscript;
+      }
+
+      state.readyForVariants = Boolean(fallbackTranscript);
+      renderVariantPlaceholder(fallbackTranscript ? '녹음 파일 STT를 못 해서, 마지막 인식 결과를 보여드립니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
+      setStatus(`녹음 파일 STT에 실패했습니다: ${friendlyError(error)}`);
+    } finally {
+      if (captureRevision === state.captureRevision) {
+        state.isTranscribing = false;
+        setActionControlsDisabled(false);
+      }
+    }
+  })();
 }
 
 function onRecognitionResult(event) {
@@ -192,10 +254,12 @@ function onRecognitionResult(event) {
 
   state.recognitionSegments = merged.segments;
   state.recognitionCommittedTranscript = merged.committedTranscript;
-  state.transcript = syncTranscriptDisplay(merged.transcript);
+  state.liveTranscriptBackup = merged.transcript;
   state.pendingLineBreakBeforeNextSpeech = false;
 
-  setStatus('음성을 듣고 STT 원문을 즉시 쌓는 중입니다.');
+  if (!state.isTranscribing) {
+    setStatus('녹음 중입니다. 정지하면 녹음 파일을 STT로 다시 읽습니다.');
+  }
 }
 
 function onRecognitionError(event) {
@@ -215,6 +279,7 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
+  state.liveTranscriptBackup = els.transcript.value;
   state.recognitionSegments = [{ transcript: els.transcript.value, isFinal: true }];
   state.recognitionCommittedTranscript = els.transcript.value;
   if (state.readyForVariants) {
@@ -582,8 +647,9 @@ function chooseConfirmationSummary(remoteSummaryText, localSummary, selectedText
 function setActionControlsDisabled(isBusy) {
   const hasTranscript = Boolean(normalizeWhitespace(els.transcript.value || state.transcript));
   const hasVariants = state.variants.length > 0;
-  els.generateButton.disabled = isBusy;
-  els.copyButton.disabled = isBusy || !hasTranscript || !hasVariants;
+  const busy = Boolean(isBusy || state.isTranscribing);
+  els.generateButton.disabled = busy || !hasTranscript;
+  els.copyButton.disabled = busy || !hasTranscript || !hasVariants;
 }
 
 async function startVoiceActivityMonitor() {
