@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-16';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-16';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-16';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-16';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-16';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-17';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-17';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-17';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-17';
+import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-17';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
@@ -86,7 +86,7 @@ function initialize() {
 function renderRecordedTranscript() {
   if (!els.recordedTranscript) return;
 
-  const transcriptText = normalizeWhitespace(state.cleanedTranscript || state.rawTranscript);
+  const transcriptText = normalizeWhitespace(state.rawTranscript);
   const hasTranscript = Boolean(transcriptText);
   els.recordedTranscript.classList.toggle('empty-state', !hasTranscript);
   els.recordedTranscript.textContent = hasTranscript
