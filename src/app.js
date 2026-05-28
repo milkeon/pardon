@@ -1,21 +1,20 @@
-import { buildConfirmationSummary, buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=confirm-llm-8';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-8';
 import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-8';
 import { transcribeAudioBlob } from './asr.js?v=confirm-llm-8';
-import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
   stopButton: document.querySelector('[data-action="stop-recording"]'),
+  transcribeButton: document.querySelector('[data-action="transcribe-recording"]'),
   clearButton: document.querySelector('[data-action="clear"]'),
   generateButton: document.querySelector('[data-action="generate"]'),
   copyButton: document.querySelector('[data-action="copy"]'),
-  transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
   transcriptComparisonStatus: document.querySelector('#transcript-comparison-status'),
-  liveTranscript: document.querySelector('#live-transcript'),
-  recordedTranscript: document.querySelector('#recorded-transcript'),
-  recoveredTranscript: document.querySelector('#recovered-transcript'),
+  comparisonRaw: document.querySelector('#comparison-raw'),
+  comparisonRecorded: document.querySelector('#comparison-recorded'),
+  comparisonDiff: document.querySelector('#comparison-diff'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   variantList: document.querySelector('#variant-list'),
@@ -27,21 +26,17 @@ const els = {
 
 const state = {
   recorder: null,
-  recognition: null,
   stream: null,
   audioContext: null,
   audioSource: null,
   audioAnalyser: null,
   audioSamples: null,
   chunks: [],
-  transcript: '',
-  liveTranscriptRaw: '',
-  recordedTranscriptRaw: '',
-  recoveredTranscript: '',
+  recordedAudioBlob: null,
+  rawTranscript: '',
+  cleanedTranscript: '',
   transcriptComparison: null,
-  recognitionSegments: [],
-  recognitionCommittedTranscript: '',
-  liveTranscriptBackup: '',
+  selectedTranscriptSource: 'cleaned',
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
   variants: [],
@@ -79,10 +74,12 @@ function initialize() {
 function wireEvents() {
   els.startButton.addEventListener('click', startCapture);
   els.stopButton.addEventListener('click', stopCapture);
+  els.transcribeButton.addEventListener('click', handleTranscribeClicked);
   els.clearButton.addEventListener('click', clearAll);
   els.generateButton.addEventListener('click', handleGenerateClicked);
   els.copyButton.addEventListener('click', copySelectedVariant);
-  els.transcript.addEventListener('input', onTranscriptEdit);
+  els.comparisonRaw.addEventListener('click', () => selectComparisonSource('raw'));
+  els.comparisonRecorded.addEventListener('click', () => selectComparisonSource('cleaned'));
 }
 
 async function startCapture() {
@@ -91,27 +88,17 @@ async function startCapture() {
     state.isStopping = false;
     state.isTranscribing = false;
     state.captureRevision += 1;
-    const captureRevision = state.captureRevision;
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.chunks = [];
     state.recorder = new MediaRecorder(state.stream);
     state.recorder.addEventListener('dataavailable', onChunk);
-    state.recorder.addEventListener('stop', () => onRecorderStop(captureRevision));
+    state.recorder.addEventListener('stop', () => onRecorderStop(state.captureRevision));
     state.recorder.start(1000);
 
     await startVoiceActivityMonitor();
 
-    const recognition = createSpeechRecognition();
-    state.recognition = recognition;
-    if (recognition) {
-      recognition.onresult = onRecognitionResult;
-      recognition.onerror = onRecognitionError;
-      recognition.onend = onRecognitionEnd;
-      recognition.start();
-    }
-
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 정지하면 녹음 파일을 STT로 다시 읽어서 원문을 만듭니다.');
+    setStatus('녹음을 시작했습니다. 정지하면 오디오 옆 STT 버튼으로 파일 전사를 합니다.');
   } catch (error) {
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
     cleanupAudioActivityMonitor();
@@ -124,15 +111,6 @@ function stopCapture() {
   state.recognitionRestartTimer = null;
 
   cleanupAudioActivityMonitor();
-
-  if (state.recognition) {
-    try {
-      state.recognition.stop();
-    } catch {
-      // ignore
-    }
-    state.recognition = null;
-  }
 
   if (state.recorder && state.recorder.state !== 'inactive') {
     try {
@@ -149,11 +127,13 @@ function stopCapture() {
 
   state.readyForVariants = false;
   state.variants = [];
-  state.isTranscribing = true;
-  renderVariantPlaceholder('녹음 파일을 STT로 다시 읽는 중입니다. 잠시만 기다려 주세요.');
+  state.isTranscribing = false;
+  state.recordedAudioBlob = null;
+  renderVariantPlaceholder('정지하면 오디오 옆 STT 버튼으로 파일 전사를 시작할 수 있습니다.');
   renderTranscriptComparison();
   setRecording(false);
-  setStatus('녹음을 종료했습니다. 녹음 파일을 STT로 다시 읽는 중입니다.');
+  updateTranscribeButtonState();
+  setStatus('녹음을 종료했습니다. 오디오 옆 STT 버튼을 눌러 파일 전사를 시작하세요.');
   state.isStopping = false;
 }
 
@@ -163,16 +143,17 @@ function clearAll() {
   clearSessionState();
   setTranscript('');
   setAudioUrl('');
-  renderVariantPlaceholder('정지하면 변환 버튼으로 3가지 결과를 만들 수 있습니다.');
+  renderVariantPlaceholder('STT 버튼을 눌러 원문과 녹음 STT를 비교하세요.');
   setStatus('원문, 오디오, 선택 상태를 초기화했습니다.');
 }
 
 function clearSessionState() {
   state.chunks = [];
-  state.transcript = '';
-  state.recognitionSegments = [];
-  state.recognitionCommittedTranscript = '';
-  state.liveTranscriptBackup = '';
+  state.recordedAudioBlob = null;
+  state.rawTranscript = '';
+  state.cleanedTranscript = '';
+  state.transcriptComparison = null;
+  state.selectedTranscriptSource = 'cleaned';
   state.variants = [];
   state.confirmedSummary = '';
   state.readyForVariants = false;
@@ -180,10 +161,7 @@ function clearSessionState() {
   state.lastVoiceAt = 0;
   state.pendingLineBreakBeforeNextSpeech = false;
   state.audioVoiceActive = false;
-  state.liveTranscriptRaw = '';
-  state.recordedTranscriptRaw = '';
-  state.recoveredTranscript = '';
-  state.transcriptComparison = null;
+  setAudioUrl('');
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
   renderTranscriptComparison();
 }
@@ -196,56 +174,81 @@ function onChunk(event) {
 
 function onRecorderStop(captureRevision) {
   if (captureRevision !== state.captureRevision) {
-    state.isTranscribing = false;
     return;
   }
 
   if (!state.chunks.length) {
-    state.isTranscribing = false;
-    state.readyForVariants = Boolean(normalizeWhitespace(state.liveTranscriptRaw || state.transcript));
+    state.recordedAudioBlob = null;
+    updateTranscribeButtonState();
     renderTranscriptComparison();
     return;
   }
 
   const blob = new Blob(state.chunks, { type: state.recorder?.mimeType || 'audio/webm' });
+  state.recordedAudioBlob = blob;
   setAudioUrl(URL.createObjectURL(blob));
+  updateTranscribeButtonState();
+  renderTranscriptComparison();
+}
 
-  void (async () => {
-    try {
-      const recordedTranscript = await transcribeAudioBlob(blob);
-      if (captureRevision !== state.captureRevision) {
-        return;
-      }
+async function handleTranscribeClicked() {
+  if (!state.recordedAudioBlob || state.isTranscribing) {
+    return;
+  }
 
-      state.recordedTranscriptRaw = recordedTranscript || '';
-      refreshTranscriptComparison();
+  state.isTranscribing = true;
+  state.readyForVariants = false;
+  setActionControlsDisabled(true);
+  updateTranscribeButtonState();
+  setStatus('녹음 파일을 STT하는 중입니다.');
+  renderVariantPlaceholder('녹음 파일 STT를 계산하는 중입니다. 잠시만 기다려 주세요.');
 
-      const finalTranscript = normalizeWhitespace(state.recoveredTranscript || state.liveTranscriptRaw || state.transcript);
+  try {
+    const rawTranscript = await transcribeAudioBlob(state.recordedAudioBlob);
+    const normalizedRaw = normalizeWhitespace(rawTranscript || '');
+    const cleanedTranscript = normalizeWhitespace(buildRewriteVariants(normalizedRaw)[0]?.text || normalizedRaw);
 
-      state.readyForVariants = Boolean(finalTranscript);
-      renderVariantPlaceholder(finalTranscript ? '실시간 원문과 녹음 파일 STT를 비교했습니다. 변환 버튼을 누르면 3가지 결과를 만듭니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
-      setStatus(finalTranscript ? '실시간 STT와 녹음 파일 STT를 비교해 복구했습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.' : '녹음 파일 STT에 실패했습니다. 원문을 다시 확인해 주세요.');
-    } catch (error) {
-      if (captureRevision !== state.captureRevision) {
-        return;
-      }
+    state.rawTranscript = normalizedRaw;
+    state.cleanedTranscript = cleanedTranscript || normalizedRaw;
+    state.transcriptComparison = buildTranscriptComparison(state.rawTranscript, state.cleanedTranscript);
+    state.selectedTranscriptSource = state.transcriptComparison.changedCount === 0 ? 'raw' : 'cleaned';
+    state.readyForVariants = Boolean(normalizeWhitespace(getRewriteSourceText()));
 
-      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptRaw || state.transcript);
-      if (fallbackTranscript) {
-        state.recoveredTranscript = fallbackTranscript;
-      }
+    renderTranscriptComparison();
+    renderVariantPlaceholder(state.readyForVariants ? '원문 STT 또는 녹음 STT를 선택한 뒤 변환하세요.' : '녹음 파일 STT가 비어 있습니다. 다시 시도해 주세요.');
+    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 원문 STT와 녹음 STT를 클릭해서 선택하세요.' : '녹음 파일 STT 결과가 비어 있습니다.');
+  } catch (error) {
+    state.rawTranscript = '';
+    state.cleanedTranscript = '';
+    state.transcriptComparison = null;
+    state.selectedTranscriptSource = 'cleaned';
+    renderTranscriptComparison();
+    renderVariantPlaceholder('녹음 파일 STT에 실패했습니다.');
+    setStatus(`녹음 파일 STT에 실패했습니다: ${friendlyError(error)}`);
+  } finally {
+    state.isTranscribing = false;
+    setActionControlsDisabled(false);
+    updateTranscribeButtonState();
+  }
+}
 
-      state.readyForVariants = Boolean(fallbackTranscript);
-      renderTranscriptComparison();
-      renderVariantPlaceholder(fallbackTranscript ? '녹음 파일 STT를 못 해서, 실시간 원문을 기준으로 복구했습니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
-      setStatus(`녹음 파일 STT에 실패했습니다: ${friendlyError(error)}`);
-    } finally {
-      if (captureRevision === state.captureRevision) {
-        state.isTranscribing = false;
-        setActionControlsDisabled(false);
-      }
-    }
-  })();
+function selectComparisonSource(source) {
+  if (!state.rawTranscript && !state.cleanedTranscript) {
+    return;
+  }
+
+  state.selectedTranscriptSource = source;
+  state.readyForVariants = Boolean(normalizeWhitespace(getRewriteSourceText()));
+  renderTranscriptComparison();
+}
+
+function buildTranscriptComparison(rawText, cleanedText) {
+  const comparison = buildVariantComparison(rawText, cleanedText);
+  return {
+    ...comparison,
+    rawText,
+    cleanedText
+  };
 }
 
 function onRecognitionResult(event) {
@@ -311,18 +314,18 @@ function renderVariants() {
 
   if (!state.readyForVariants) {
     state.variants = [];
-    renderVariantPlaceholder('정지하면 변환 버튼으로 3가지 결과를 만들 수 있습니다.');
+    renderVariantPlaceholder('STT가 끝나면 변환 버튼으로 3가지 결과를 만들 수 있습니다.');
     return;
   }
 
   if (!transcript) {
     state.variants = [];
-    renderVariantPlaceholder('원문이 비어 있어서 변환할 수 없습니다.');
+    renderVariantPlaceholder('선택한 원문이 비어 있어서 변환할 수 없습니다.');
     return;
   }
 
   if (!state.variants.length) {
-    renderVariantPlaceholder('변환 버튼을 누르면 원문을 바탕으로 3가지 결과를 만듭니다.');
+    renderVariantPlaceholder('변환 버튼을 누르면 선택한 원문을 바탕으로 3가지 결과를 만듭니다.');
     return;
   }
 
@@ -337,7 +340,7 @@ function renderVariantCards(variants) {
     state.selectedVariantId = variants[0]?.id || 'possibility-1';
   }
 
-  const sourceText = normalizeWhitespace(els.transcript.value || state.transcript);
+  const sourceText = getRewriteSourceText();
 
   variants.forEach((variant) => {
     const comparison = buildVariantComparison(sourceText, variant.text);
@@ -561,17 +564,17 @@ function createSpeechRecognition() {
 
 function updateSupportStatus() {
   const hasRecorder = typeof MediaRecorder !== 'undefined';
-  const hasSpeechRecognition = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   els.supportStatus.textContent = [
     hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
-    hasSpeechRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨'
+    '파일 STT: STT 버튼으로 실행'
   ].join(' · ');
 }
 
 function setRecording(isRecording) {
   els.startButton.disabled = isRecording;
   els.stopButton.disabled = !isRecording;
+  updateTranscribeButtonState();
 }
 
 function setStatus(message) {
@@ -579,41 +582,28 @@ function setStatus(message) {
 }
 
 function setTranscript(value) {
-  state.transcript = value;
-  els.transcript.value = value;
+  state.rawTranscript = value;
+  state.cleanedTranscript = value;
 }
 
 function getRewriteSourceText() {
-  return normalizeWhitespace(state.recoveredTranscript || els.transcript.value || state.liveTranscriptRaw || state.transcript);
+  if (!state.transcriptComparison) {
+    return '';
+  }
+
+  return normalizeWhitespace(
+    state.selectedTranscriptSource === 'raw'
+      ? state.transcriptComparison.rawText
+      : state.transcriptComparison.cleanedText
+  );
 }
 
 function refreshTranscriptComparison() {
-  const liveTranscript = normalizeWhitespace(state.liveTranscriptRaw || els.transcript.value || state.transcript);
-  const recordedTranscript = normalizeWhitespace(state.recordedTranscriptRaw || '');
-
-  if (!liveTranscript && !recordedTranscript) {
-    state.recoveredTranscript = '';
-    state.transcriptComparison = null;
-    renderTranscriptComparison();
-    return;
-  }
-
-  const comparison = compareTranscriptSources(liveTranscript, recordedTranscript, state.transcript);
-  state.transcriptComparison = comparison;
-  state.recoveredTranscript = comparison.recoveredText || liveTranscript || recordedTranscript;
   renderTranscriptComparison();
 }
 
 function syncTranscriptDisplay(nextValue) {
-  const currentValue = els.transcript.value || '';
-  const targetValue = String(nextValue ?? '');
-
-  if (currentValue === targetValue) return targetValue;
-
-  const commonPrefixLength = getCommonPrefixLength(currentValue, targetValue);
-  const syncedValue = `${currentValue.slice(0, commonPrefixLength)}${targetValue.slice(commonPrefixLength)}`;
-  els.transcript.value = syncedValue;
-  return syncedValue;
+  return String(nextValue ?? '');
 }
 
 function getCommonPrefixLength(left, right) {
@@ -634,31 +624,37 @@ function renderVariantPlaceholder(message) {
 }
 
 function renderTranscriptComparison() {
-  const liveText = state.liveTranscriptRaw || els.transcript.value || '';
-  const recordedText = state.recordedTranscriptRaw || '';
-  const recoveredText = state.recoveredTranscript || '';
+  const rawText = state.rawTranscript || '';
+  const cleanedText = state.cleanedTranscript || '';
+  const comparison = state.transcriptComparison || (rawText || cleanedText ? buildTranscriptComparison(rawText, cleanedText || rawText) : null);
+  const rawCardText = rawText || 'STT 버튼을 누르면 원문 STT가 여기에 표시됩니다.';
+  const cleanedCardText = cleanedText || 'STT 버튼을 누르면 녹음 STT가 여기에 표시됩니다.';
+  const diffText = comparison?.summary || 'STT를 마치면 차이가 여기 표시됩니다.';
 
-  if (els.liveTranscript) {
-    els.liveTranscript.textContent = liveText || '실시간 받아쓰기가 여기에 표시됩니다.';
+  if (els.comparisonRaw) {
+    els.comparisonRaw.classList.toggle('is-selected', state.selectedTranscriptSource === 'raw');
+    els.comparisonRaw.querySelector('.transcript-surface__text').innerHTML = comparison?.rawText ? escapeHtml(rawCardText) : escapeHtml(rawCardText);
   }
 
-  if (els.recordedTranscript) {
-    els.recordedTranscript.textContent = recordedText || '녹음이 끝나면 파일 기반 STT 결과가 여기에 표시됩니다.';
+  if (els.comparisonRecorded) {
+    els.comparisonRecorded.classList.toggle('is-selected', state.selectedTranscriptSource === 'cleaned');
+    els.comparisonRecorded.querySelector('.transcript-surface__text').innerHTML = comparison?.cleanedText
+      ? comparison.html
+      : escapeHtml(cleanedCardText);
   }
 
-  if (els.recoveredTranscript) {
-    els.recoveredTranscript.textContent = recoveredText || '실시간 STT와 녹음 STT를 비교해 복구하면 여기에 표시됩니다.';
+  if (els.comparisonDiff) {
+    els.comparisonDiff.textContent = diffText;
   }
 
   if (els.transcriptComparisonStatus) {
-    if (!state.transcriptComparison) {
-      els.transcriptComparisonStatus.textContent = '실시간 원문과 녹음 파일 STT를 각각 비교합니다.';
+    if (!comparison || (!rawText && !cleanedText)) {
+      els.transcriptComparisonStatus.textContent = 'STT 버튼을 누르면 원문 STT와 녹음 STT를 비교합니다.';
       return;
     }
 
-    const { chosenSource, liveScore, recordedScore, summary } = state.transcriptComparison;
-    const pickedLabel = chosenSource === 'recorded' ? '녹음 파일 STT' : '실시간 받아쓰기';
-    els.transcriptComparisonStatus.textContent = `${pickedLabel}를 기준으로 복구합니다. ${summary} (실시간 ${liveScore.toFixed(2)} · 녹음 ${recordedScore.toFixed(2)})`;
+    const pickedLabel = state.selectedTranscriptSource === 'raw' ? '원문 STT' : '녹음 STT';
+    els.transcriptComparisonStatus.textContent = `${pickedLabel}를 기준으로 변환합니다. ${comparison.summary}`;
   }
 }
 
@@ -712,6 +708,15 @@ function setActionControlsDisabled(isBusy) {
   const busy = Boolean(isBusy || state.isTranscribing);
   els.generateButton.disabled = busy || !hasTranscript;
   els.copyButton.disabled = busy || !hasTranscript || !hasVariants;
+  updateTranscribeButtonState();
+}
+
+function updateTranscribeButtonState() {
+  if (!els.transcribeButton) return;
+
+  els.transcribeButton.disabled = Boolean(
+    !state.recordedAudioBlob || state.isTranscribing || state.isStopping || (state.recorder && state.recorder.state === 'recording')
+  );
 }
 
 async function startVoiceActivityMonitor() {
@@ -742,9 +747,6 @@ async function startVoiceActivityMonitor() {
     state.audioAnalyser.getFloatTimeDomainData(state.audioSamples);
     const level = calculateRms(state.audioSamples);
     if (level >= VOICE_LEVEL_THRESHOLD) {
-      if (!state.audioVoiceActive && state.lastVoiceAt && Date.now() - state.lastVoiceAt >= 1000 && normalizeWhitespace(els.transcript.value || state.transcript)) {
-        state.pendingLineBreakBeforeNextSpeech = true;
-      }
       state.audioVoiceActive = true;
       state.lastVoiceAt = Date.now();
       return;
