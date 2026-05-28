@@ -1,8 +1,8 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=stt-linebreak-22';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=stt-linebreak-22';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-linebreak-22';
-import { mergeRecognitionResults } from './stt.js?v=stt-linebreak-22';
-import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-linebreak-22';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=stt-linebreak-23';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=stt-linebreak-23';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-linebreak-23';
+import { mergeRecognitionResults } from './stt.js?v=stt-linebreak-23';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-linebreak-23';
 
 const testHooks = getTestHooks();
 
@@ -704,6 +704,26 @@ function setTranscript(value) {
   }
 }
 
+function commitTranscriptLineBreak() {
+  const transcript = String(state.transcript ?? '');
+  const committedTranscript = String(state.recognitionCommittedTranscript ?? '');
+
+  if (!transcript || transcript.endsWith('\n') || transcript !== committedTranscript) {
+    return false;
+  }
+
+  state.transcript = `${transcript}\n`;
+  state.recognitionCommittedTranscript = `${committedTranscript}\n`;
+  state.liveTranscriptRaw = state.transcript;
+  state.pendingLineBreakBeforeNextSpeech = false;
+
+  if (els.transcript) {
+    els.transcript.value = state.transcript;
+  }
+
+  return true;
+}
+
 function getRewriteSourceText() {
   if (normalizeWhitespace(state.transcript)) {
     return normalizeWhitespace(state.transcript);
@@ -879,8 +899,8 @@ async function startVoiceActivityMonitor() {
       const isSpeaking = rms >= VOICE_LEVEL_THRESHOLD;
       const wasSpeaking = state.audioVoiceActive;
 
-      if (isSpeaking) {
-        if (shouldInsertLineBreakBeforeNextSpeech({
+      if (!isSpeaking) {
+        if (shouldCommitTranscriptLineBreakAfterSilence({
           hasTranscript: Boolean(state.recognitionCommittedTranscript),
           wasSpeaking,
           isSpeaking,
@@ -888,17 +908,29 @@ async function startVoiceActivityMonitor() {
           now,
           silenceMs: 1000
         })) {
-          state.pendingLineBreakBeforeNextSpeech = true;
+          commitTranscriptLineBreak();
         }
 
-        state.lastVoiceAt = now;
-        state.audioVoiceActive = true;
+        if (wasSpeaking) {
+          state.audioVoiceActive = false;
+        }
+
         return;
       }
 
-      if (wasSpeaking) {
-        state.audioVoiceActive = false;
+      if (shouldInsertLineBreakBeforeNextSpeech({
+        hasTranscript: Boolean(state.recognitionCommittedTranscript),
+        wasSpeaking,
+        isSpeaking,
+        lastVoiceAt: state.lastVoiceAt,
+        now,
+        silenceMs: 1000
+      })) {
+        state.pendingLineBreakBeforeNextSpeech = true;
       }
+
+      state.lastVoiceAt = now;
+      state.audioVoiceActive = true;
     }, VOICE_CHECK_INTERVAL_MS);
   } catch {
     cleanupAudioActivityMonitor();

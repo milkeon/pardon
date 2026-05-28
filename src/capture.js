@@ -34,3 +34,19 @@ export function shouldInsertLineBreakBeforeNextSpeech({
     && hasTimedOutSince(lastVoiceAt, now, silenceMs)
   );
 }
+
+export function shouldCommitTranscriptLineBreakAfterSilence({
+  hasTranscript = false,
+  wasSpeaking = false,
+  isSpeaking = false,
+  lastVoiceAt = 0,
+  now = Date.now(),
+  silenceMs = 1000
+} = {}) {
+  return Boolean(
+    hasTranscript
+    && wasSpeaking
+    && !isSpeaking
+    && hasTimedOutSince(lastVoiceAt, now, silenceMs)
+  );
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateRms, hasTimedOutSince, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from '../src/capture.js';
+import { calculateRms, hasTimedOutSince, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from '../src/capture.js';
 
 test('calculateRms는 입력 샘플의 평균 제곱근 값을 계산한다', () => {
   const rms = calculateRms([0, 0.5, -0.5, 0]);
@@ -48,6 +48,44 @@ test('shouldInsertLineBreakBeforeNextSpeech는 1초 이상 무음 뒤 첫 발화
       hasTranscript: false,
       wasSpeaking: false,
       isSpeaking: true,
+      lastVoiceAt: 1_000,
+      now: 2_100,
+      silenceMs: 1_000
+    }),
+    false
+  );
+});
+
+test('shouldCommitTranscriptLineBreakAfterSilence는 말을 멈춘 뒤 1초 이상 지나면 true를 반환한다', () => {
+  assert.equal(
+    shouldCommitTranscriptLineBreakAfterSilence({
+      hasTranscript: true,
+      wasSpeaking: true,
+      isSpeaking: false,
+      lastVoiceAt: 1_000,
+      now: 2_100,
+      silenceMs: 1_000
+    }),
+    true
+  );
+
+  assert.equal(
+    shouldCommitTranscriptLineBreakAfterSilence({
+      hasTranscript: true,
+      wasSpeaking: false,
+      isSpeaking: false,
+      lastVoiceAt: 1_000,
+      now: 2_100,
+      silenceMs: 1_000
+    }),
+    false
+  );
+
+  assert.equal(
+    shouldCommitTranscriptLineBreakAfterSilence({
+      hasTranscript: false,
+      wasSpeaking: true,
+      isSpeaking: false,
       lastVoiceAt: 1_000,
       now: 2_100,
       silenceMs: 1_000
