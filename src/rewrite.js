@@ -479,6 +479,153 @@ export function compareTranscriptSources(liveText, recordedText, contextText = '
   };
 }
 
+export function buildTranscriptDiff(leftText, rightText, contextText = '') {
+  const leftRaw = String(leftText ?? '');
+  const rightRaw = String(rightText ?? '');
+  const left = normalizeWhitespace(leftRaw);
+  const right = normalizeWhitespace(rightRaw);
+  const leftTokens = tokenizeDiffTokens(left);
+  const rightTokens = tokenizeDiffTokens(right);
+  const operations = buildDiffOperations(leftTokens, rightTokens);
+  const segments = [];
+  let changeIndex = 0;
+  let equalIndex = 0;
+  let current = null;
+
+  const flush = () => {
+    if (!current) {
+      return;
+    }
+
+    if (current.kind === 'equal') {
+      current.text = current.tokens.join(' ');
+    } else {
+      current.id = `diff-${changeIndex += 1}`;
+      current.leftText = current.leftTokens.join(' ');
+      current.rightText = current.rightTokens.join(' ');
+      current.changedCount = current.leftTokens.length + current.rightTokens.length;
+    }
+
+    segments.push(current);
+    current = null;
+  };
+
+  for (const operation of operations) {
+    if (operation.type === 'equal') {
+      if (!current || current.kind !== 'equal') {
+        flush();
+        current = { kind: 'equal', index: ++equalIndex, tokens: [] };
+      }
+      current.tokens.push(operation.token);
+      continue;
+    }
+
+    if (!current || current.kind !== 'change') {
+      flush();
+      current = { kind: 'change', tokens: [], leftTokens: [], rightTokens: [] };
+    }
+
+    current.tokens.push(operation.token);
+    if (operation.type === 'delete') {
+      current.leftTokens.push(operation.token);
+    } else {
+      current.rightTokens.push(operation.token);
+    }
+  }
+
+  flush();
+
+  const comparison = compareTranscriptSources(leftRaw, rightRaw, contextText || `${leftRaw} ${rightRaw}`);
+  const preferredSource = comparison.chosenSource === 'recorded' ? 'right' : 'left';
+  const selection = Object.fromEntries(
+    segments
+      .filter((segment) => segment.kind === 'change')
+      .map((segment) => [segment.id, preferredSource])
+  );
+
+  return {
+    leftText: leftRaw.trim(),
+    rightText: rightRaw.trim(),
+    leftNormalized: left,
+    rightNormalized: right,
+    segments,
+    changeCount: segments.filter((segment) => segment.kind === 'change').length,
+    preferredSource,
+    selection,
+    mergedText: renderTranscriptDiff(segments, selection),
+    summary: comparison.summary,
+    chosenSource: comparison.chosenSource
+  };
+}
+
+export function renderTranscriptDiff(segments, selection = {}) {
+  return segments
+    .map((segment) => {
+      if (segment.kind === 'equal') {
+        return segment.text;
+      }
+
+      return selection[segment.id] === 'left' ? segment.leftText : segment.rightText;
+    })
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeDiffTokens(text) {
+  return normalizeWhitespace(text)
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function buildDiffOperations(leftTokens, rightTokens) {
+  const leftLength = leftTokens.length;
+  const rightLength = rightTokens.length;
+  const dp = Array.from({ length: leftLength + 1 }, () => Array(rightLength + 1).fill(0));
+
+  for (let i = leftLength - 1; i >= 0; i -= 1) {
+    for (let j = rightLength - 1; j >= 0; j -= 1) {
+      dp[i][j] = leftTokens[i] === rightTokens[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const operations = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < leftLength && j < rightLength) {
+    if (leftTokens[i] === rightTokens[j]) {
+      operations.push({ type: 'equal', token: leftTokens[i] });
+      i += 1;
+      j += 1;
+      continue;
+    }
+
+    if (dp[i + 1][j] >= dp[i][j + 1]) {
+      operations.push({ type: 'delete', token: leftTokens[i] });
+      i += 1;
+    } else {
+      operations.push({ type: 'insert', token: rightTokens[j] });
+      j += 1;
+    }
+  }
+
+  while (i < leftLength) {
+    operations.push({ type: 'delete', token: leftTokens[i] });
+    i += 1;
+  }
+
+  while (j < rightLength) {
+    operations.push({ type: 'insert', token: rightTokens[j] });
+    j += 1;
+  }
+
+  return operations;
+}
+
 function scoreTranscriptRecoveryCandidate(candidateText, alternateText, contextText, profile) {
   const candidate = normalizeWhitespace(candidateText);
   if (!candidate) return -Infinity;

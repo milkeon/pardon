@@ -1,10 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildConfirmationSummary, buildRewriteVariants, compareTranscriptSources, deriveContextProfile, guardRewriteVariant, inferContextHints, normalizeWhitespace } from '../src/rewrite.js';
+import { buildConfirmationSummary, buildRewriteVariants, buildTranscriptDiff, compareTranscriptSources, deriveContextProfile, guardRewriteVariant, inferContextHints, normalizeWhitespace, renderTranscriptDiff } from '../src/rewrite.js';
 import { predictRewriteFocus } from '../src/ml.js';
 
 test('normalizeWhitespace는 과도한 공백을 정리한다', () => {
   assert.equal(normalizeWhitespace('  hello\n\nworld  '), 'hello world');
+});
+
+test('buildTranscriptDiff는 바뀐 부분만 카드로 분리한다', () => {
+  const diff = buildTranscriptDiff('원문은 조금 길고 녹음은 짧다', '원문은 아주 조금 길고 녹음은 더 짧다');
+  const changed = diff.segments.filter((segment) => segment.kind === 'change');
+
+  assert.ok(changed.length >= 1);
+  assert.ok(diff.changeCount >= 1);
+  assert.ok(diff.mergedText.length > 0);
+  assert.equal(renderTranscriptDiff(diff.segments, diff.selection), diff.mergedText);
+  assert.ok(changed.every((segment) => segment.leftText !== segment.rightText));
 });
 
 test('inferContextHints는 문맥 키워드에 반응한다', () => {

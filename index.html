@@ -6,7 +6,7 @@
     <meta name="description" content="Pardon은 녹음 파일 STT를 버튼으로 실행하고, 원문 STT와 정리본을 비교해 클릭으로 선택하는 정적 브라우저 앱입니다." />
     <title>Pardon</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./src/app.js?v=stt-linebreak-24"></script>
+    <script type="module" src="./src/app.js?v=stt-diff-25"></script>
   </head>
   <body>
     <main class="shell">
@@ -45,25 +45,6 @@
               <pre id="recorded-transcript" class="audio-transcript__text empty-state">STT 버튼을 누르면 녹음 STT가 아래에 표시됩니다.</pre>
             </div>
           </div>
-          <section class="transcript-comparison">
-            <div class="panel__header">
-              <h2>원문 STT / 녹음 STT</h2>
-              <span id="transcript-comparison-status">STT 버튼을 누르면 원문 STT와 녹음 STT를 비교합니다.</span>
-            </div>
-            <div class="transcript-comparison__grid">
-              <button type="button" id="comparison-raw" class="transcript-surface transcript-surface--selectable">
-                <span>원문 STT</span>
-                <pre class="transcript-surface__text empty-state">STT 버튼을 누르면 원문 STT가 여기에 표시됩니다.</pre>
-              </button>
-              <button type="button" id="comparison-recorded" class="transcript-surface transcript-surface--selectable">
-                <span>녹음 STT</span>
-                <pre class="transcript-surface__text empty-state">STT 버튼을 누르면 녹음 STT가 여기에 표시됩니다.</pre>
-              </button>
-              <article id="comparison-diff" class="transcript-surface transcript-surface--diff empty-state">
-                STT를 마치면 차이가 여기 표시됩니다.
-              </article>
-            </div>
-          </section>
           <div class="transcript-actions">
             <button class="button button--ghost" data-action="copy">선택한 문장 복사</button>
           </div>
@@ -71,27 +52,26 @@
 
         <article class="panel">
           <div class="panel__header">
-            <h2>제안 3가지</h2>
+            <h2>차이 선택</h2>
           </div>
           <div class="variant-guide">
-            <p class="variant-guide__title">차이 읽는 법</p>
+            <p class="variant-guide__title">git diff처럼 고르기</p>
             <ul class="variant-guide__list">
-              <li><strong>노란색</strong>은 원문에서 바뀐 부분입니다.</li>
-              <li><strong>제안 1</strong>은 음성 인식 오류만 최소로 고칩니다.</li>
-              <li><strong>제안 2</strong>는 문맥을 살려 자연스럽게 다시 씁니다.</li>
-              <li><strong>제안 3</strong>은 핵심 의미까지 정리한 최종본입니다.</li>
+              <li><strong>원문 STT</strong>와 <strong>녹음 STT</strong>의 다른 부분만 카드로 보여줍니다.</li>
+              <li>각 카드에서 둘 중 더 맞는 쪽을 선택하면 아래 결과가 바로 바뀝니다.</li>
+              <li>바뀌지 않은 부분은 그대로 유지됩니다.</li>
             </ul>
           </div>
           <div id="variants-empty" class="empty-state" hidden>
-            STT 버튼을 누른 뒤 변환하면 3가지 결과를 만들 수 있습니다.
+            STT 버튼을 누른 뒤 변환하면 차이만 선택할 수 있습니다.
           </div>
           <div id="variant-list" class="variant-list" aria-live="polite"></div>
           <section class="confirmation-panel">
             <div class="panel__header">
-              <h2>확정 요약</h2>
-              <span id="confirmation-status">확정하면 아래에 요약이 표시됩니다.</span>
+              <h2>선택 결과</h2>
+              <span id="confirmation-status">선택하면 아래에 결과가 표시됩니다.</span>
             </div>
-            <div id="confirmed-summary" class="confirmed-summary empty-state">확정하면 아래에 요약이 표시됩니다.</div>
+            <div id="confirmed-summary" class="confirmed-summary empty-state">선택하면 아래에 결과가 표시됩니다.</div>
           </section>
         </article>
       </section>

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const fakeTranscript = '쿠키 세션은\n브라우저 상태를 관리합니다.';
+const fakeTranscript = 'Please fix the redirect issue and send the update to the team. 리사이젝트도 정리해 주세요.';
 const fakeVariants = [
   {
     id: 'possibility-1',
@@ -172,16 +172,15 @@ test('Pardon은 녹음 → 정지 → STT → 변환 → 확정 흐름을 테스
 
   await sttButton.click();
   await expect(page.locator('#recorded-transcript')).toHaveText(fakeTranscript);
-  await expect(page.locator('#comparison-recorded .transcript-surface__text')).toHaveText(fakeTranscript);
-
 
   await page.getByRole('button', { name: '변환' }).click();
-  await expect(page.getByText('제안 1 · 오인식 보정')).toBeVisible();
-  await expect(page.getByText('제안 2 · 문맥 교정')).toBeVisible();
-  await expect(page.getByText('제안 3 · 매끄러운 문장')).toBeVisible();
+  await expect(page.locator('#variant-list .variant-card')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '원문 사용' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '녹음 사용' })).toBeVisible();
+  await expect(page.locator('#confirmed-summary')).toContainText(fakeTranscript);
 
-  await page.getByRole('button', { name: '확정' }).first().click();
-  await expect(page.getByText('브라우저는 쿠키와 세션으로 상태를 관리합니다.')).toBeVisible();
+  await page.getByRole('button', { name: '녹음 사용' }).click();
+  await expect(page.locator('#confirmed-summary')).toContainText('리다이렉트 문제를 수정하고 업데이트를 팀에 보내야 합니다.');
 
   expect(errors).toEqual([]);
 });
