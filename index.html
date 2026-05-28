@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Pardon은 음성을 녹음하고, STT 원문을 쭉 표시한 뒤, 정지 후 3가지 제안을 보여주고 선택 결과를 요약하는 정적 브라우저 앱입니다." />
+    <meta name="description" content="Pardon은 실시간 받아쓰기와 녹음 파일 STT를 함께 비교하고, 가장 자연스러운 원문을 복구한 뒤 3가지 제안을 보여주는 정적 브라우저 앱입니다." />
     <title>Pardon</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./src/app.js?v=confirm-llm-7"></script>
+    <script type="module" src="./src/app.js?v=confirm-llm-8"></script>
   </head>
   <body>
     <main class="shell">
@@ -31,9 +31,29 @@
             <span id="transcript-status">녹음을 시작할 수 있습니다.</span>
           </div>
           <label class="field">
-            <span>원문</span>
-            <textarea id="transcript" rows="12" placeholder="녹음이 끝나면 STT 결과가 여기에 표시됩니다. 직접 붙여넣어도 됩니다." spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+            <span>실시간 원문</span>
+            <textarea id="transcript" rows="12" placeholder="녹음이 진행되는 동안 실시간 받아쓰기 결과가 여기에 표시됩니다." spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
           </label>
+          <section class="transcript-comparison">
+            <div class="panel__header">
+              <h2>비교 / 복구</h2>
+              <span id="transcript-comparison-status">실시간 원문과 녹음 파일 STT를 각각 비교합니다.</span>
+            </div>
+            <div class="transcript-comparison__grid">
+              <article class="transcript-surface">
+                <span>실시간 받아쓰기</span>
+                <pre id="live-transcript" class="transcript-surface__text empty-state">실시간 받아쓰기가 여기에 표시됩니다.</pre>
+              </article>
+              <article class="transcript-surface">
+                <span>녹음 파일 STT</span>
+                <pre id="recorded-transcript" class="transcript-surface__text empty-state">녹음이 끝나면 파일 기반 STT 결과가 여기에 표시됩니다.</pre>
+              </article>
+              <article class="transcript-surface">
+                <span>복구 결과</span>
+                <pre id="recovered-transcript" class="transcript-surface__text empty-state">실시간 STT와 녹음 STT를 비교해 복구하면 여기에 표시됩니다.</pre>
+              </article>
+            </div>
+          </section>
           <div class="audio-box">
             <span>녹음된 오디오</span>
             <audio id="audio-playback" controls hidden></audio>

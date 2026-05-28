@@ -416,6 +416,107 @@ export function buildConfirmationSummary(text, sourceText = '') {
   return compressConfirmationPhrase(baseText);
 }
 
+export function compareTranscriptSources(liveText, recordedText, contextText = '') {
+  const liveRaw = String(liveText ?? '');
+  const recordedRaw = String(recordedText ?? '');
+  const live = normalizeWhitespace(liveRaw);
+  const recorded = normalizeWhitespace(recordedRaw);
+  const context = normalizeWhitespace(contextText || `${liveRaw} ${recordedRaw}`);
+
+  if (!live && !recorded) {
+    return {
+      liveText: '',
+      recordedText: '',
+      recoveredText: '',
+      chosenSource: '',
+      liveScore: 0,
+      recordedScore: 0,
+      summary: '비교할 원문이 없습니다.'
+    };
+  }
+
+  if (!recorded) {
+    return {
+      liveText: liveRaw.trim(),
+      recordedText: '',
+      recoveredText: liveRaw.trim(),
+      chosenSource: 'live',
+      liveScore: 1,
+      recordedScore: 0,
+      summary: '실시간 받아쓰기만 있어서 실시간 원문을 기준으로 복구했습니다.'
+    };
+  }
+
+  if (!live) {
+    return {
+      liveText: '',
+      recordedText: recordedRaw.trim(),
+      recoveredText: recordedRaw.trim(),
+      chosenSource: 'recorded',
+      liveScore: 0,
+      recordedScore: 1,
+      summary: '실시간 원문이 비어 있어서 녹음 파일 STT를 기준으로 복구했습니다.'
+    };
+  }
+
+  const profile = deriveContextProfile(context || live || recorded);
+  const liveScore = scoreTranscriptRecoveryCandidate(liveRaw, recordedRaw, context, profile);
+  const recordedScore = scoreTranscriptRecoveryCandidate(recordedRaw, liveRaw, context, profile);
+  const chosenSource = recordedScore >= liveScore ? 'recorded' : 'live';
+  const recoveredText = (chosenSource === 'recorded' ? recordedRaw : liveRaw).trim();
+  const summary = chosenSource === 'recorded'
+    ? '녹음 파일 STT가 더 자연스러워서 이를 기준으로 복구했습니다.'
+    : '실시간 받아쓰기가 더 자연스러워서 이를 기준으로 복구했습니다.';
+
+  return {
+    liveText: liveRaw.trim(),
+    recordedText: recordedRaw.trim(),
+    recoveredText,
+    chosenSource,
+    liveScore,
+    recordedScore,
+    summary
+  };
+}
+
+function scoreTranscriptRecoveryCandidate(candidateText, alternateText, contextText, profile) {
+  const candidate = normalizeWhitespace(candidateText);
+  if (!candidate) return -Infinity;
+
+  const candidateTokens = buildContentTokenSet(candidate);
+  const contextTokens = buildContentTokenSet(contextText);
+  const candidateTokenList = candidate
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(' ')
+    .filter(Boolean);
+  const candidateTokenSet = new Set(candidateTokenList);
+  const uniqueRatio = candidateTokenList.length ? candidateTokenSet.size / candidateTokenList.length : 0;
+  const contextOverlap = contextTokens.size ? overlapRatio(contextTokens, candidateTokens) : 0;
+  const repeatPenalty = countAdjacentTokenRepeats(candidateTokenList);
+  const alternationPenalty = normalizeWhitespace(alternateText).length > candidate.length * 1.4 ? 0.08 : 0;
+  const technicalBonus = profile.technicalExplanation ? countTechnicalAnchors(candidate) * 0.08 : 0;
+  const lengthBalance = Math.min(candidateTokenList.length / 16, 1);
+
+  return (contextOverlap * 0.9) + (uniqueRatio * 1.0) + (lengthBalance * 0.3) + technicalBonus - (repeatPenalty * 0.6) - alternationPenalty;
+}
+
+function countAdjacentTokenRepeats(tokens) {
+  let repeats = 0;
+  for (let index = 1; index < tokens.length; index += 1) {
+    if (tokens[index] === tokens[index - 1]) {
+      repeats += 1;
+    }
+  }
+  return repeats;
+}
+
+function countTechnicalAnchors(text) {
+  const source = normalizeWhitespace(text).toLowerCase();
+  const anchors = ['세션', '쿠키', '브라우저', '서버', '로그인', '인증', '토큰', '캐시', '스토리지', 'post', '라우터', 'request', 'response'];
+  return anchors.filter((anchor) => source.includes(anchor)).length;
+}
+
 function compactConfirmationSummary(candidate, baseText, sourceText) {
   const source = normalizeWhitespace(sourceText);
   const base = normalizeWhitespace(baseText);

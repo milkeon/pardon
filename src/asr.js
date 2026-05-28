@@ -88,5 +88,5 @@ function createMonoBuffer(audioContext, decoded) {
 }
 
 function normalizeTranscript(value) {
-  return String(value ?? '').replace(/\s+/g, ' ').trim();
+  return String(value ?? '').trim();
 }

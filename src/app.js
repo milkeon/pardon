@@ -1,6 +1,6 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-7';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-7';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-7';
+import { buildConfirmationSummary, buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=confirm-llm-8';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-8';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-8';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
@@ -12,6 +12,10 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcript: document.querySelector('#transcript'),
   transcriptStatus: document.querySelector('#transcript-status'),
+  transcriptComparisonStatus: document.querySelector('#transcript-comparison-status'),
+  liveTranscript: document.querySelector('#live-transcript'),
+  recordedTranscript: document.querySelector('#recorded-transcript'),
+  recoveredTranscript: document.querySelector('#recovered-transcript'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   variantList: document.querySelector('#variant-list'),
@@ -31,6 +35,10 @@ const state = {
   audioSamples: null,
   chunks: [],
   transcript: '',
+  liveTranscriptRaw: '',
+  recordedTranscriptRaw: '',
+  recoveredTranscript: '',
+  transcriptComparison: null,
   recognitionSegments: [],
   recognitionCommittedTranscript: '',
   liveTranscriptBackup: '',
@@ -63,6 +71,7 @@ function initialize() {
   updateSupportStatus();
   renderVariants();
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
+  renderTranscriptComparison();
   setActionControlsDisabled(false);
   wireEvents();
 }
@@ -142,6 +151,7 @@ function stopCapture() {
   state.variants = [];
   state.isTranscribing = true;
   renderVariantPlaceholder('녹음 파일을 STT로 다시 읽는 중입니다. 잠시만 기다려 주세요.');
+  renderTranscriptComparison();
   setRecording(false);
   setStatus('녹음을 종료했습니다. 녹음 파일을 STT로 다시 읽는 중입니다.');
   state.isStopping = false;
@@ -170,7 +180,12 @@ function clearSessionState() {
   state.lastVoiceAt = 0;
   state.pendingLineBreakBeforeNextSpeech = false;
   state.audioVoiceActive = false;
+  state.liveTranscriptRaw = '';
+  state.recordedTranscriptRaw = '';
+  state.recoveredTranscript = '';
+  state.transcriptComparison = null;
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
+  renderTranscriptComparison();
 }
 
 function onChunk(event) {
@@ -187,7 +202,8 @@ function onRecorderStop(captureRevision) {
 
   if (!state.chunks.length) {
     state.isTranscribing = false;
-    state.readyForVariants = Boolean(normalizeWhitespace(state.liveTranscriptBackup || state.transcript));
+    state.readyForVariants = Boolean(normalizeWhitespace(state.liveTranscriptRaw || state.transcript));
+    renderTranscriptComparison();
     return;
   }
 
@@ -201,32 +217,27 @@ function onRecorderStop(captureRevision) {
         return;
       }
 
-      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptBackup || state.transcript);
-      const finalTranscript = normalizeWhitespace(recordedTranscript) || fallbackTranscript;
+      state.recordedTranscriptRaw = recordedTranscript || '';
+      refreshTranscriptComparison();
 
-      if (finalTranscript) {
-        setTranscript(finalTranscript);
-        state.recognitionSegments = [{ transcript: finalTranscript, isFinal: true }];
-        state.recognitionCommittedTranscript = finalTranscript;
-      }
+      const finalTranscript = normalizeWhitespace(state.recoveredTranscript || state.liveTranscriptRaw || state.transcript);
 
       state.readyForVariants = Boolean(finalTranscript);
-      renderVariantPlaceholder(finalTranscript ? '녹음 파일 STT가 끝났습니다. 변환 버튼을 누르면 3가지 결과를 만듭니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
-      setStatus(finalTranscript ? '녹음 파일 기준 STT가 끝났습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.' : '녹음 파일 STT에 실패했습니다. 원문을 다시 확인해 주세요.');
+      renderVariantPlaceholder(finalTranscript ? '실시간 원문과 녹음 파일 STT를 비교했습니다. 변환 버튼을 누르면 3가지 결과를 만듭니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
+      setStatus(finalTranscript ? '실시간 STT와 녹음 파일 STT를 비교해 복구했습니다. 이제 변환 버튼으로 3가지 제안을 만드세요.' : '녹음 파일 STT에 실패했습니다. 원문을 다시 확인해 주세요.');
     } catch (error) {
       if (captureRevision !== state.captureRevision) {
         return;
       }
 
-      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptBackup || state.transcript);
+      const fallbackTranscript = normalizeWhitespace(state.liveTranscriptRaw || state.transcript);
       if (fallbackTranscript) {
-        setTranscript(fallbackTranscript);
-        state.recognitionSegments = [{ transcript: fallbackTranscript, isFinal: true }];
-        state.recognitionCommittedTranscript = fallbackTranscript;
+        state.recoveredTranscript = fallbackTranscript;
       }
 
       state.readyForVariants = Boolean(fallbackTranscript);
-      renderVariantPlaceholder(fallbackTranscript ? '녹음 파일 STT를 못 해서, 마지막 인식 결과를 보여드립니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
+      renderTranscriptComparison();
+      renderVariantPlaceholder(fallbackTranscript ? '녹음 파일 STT를 못 해서, 실시간 원문을 기준으로 복구했습니다.' : 'STT 원문이 비어 있습니다. 다시 녹음하거나 원문을 직접 붙여넣어 주세요.');
       setStatus(`녹음 파일 STT에 실패했습니다: ${friendlyError(error)}`);
     } finally {
       if (captureRevision === state.captureRevision) {
@@ -254,11 +265,13 @@ function onRecognitionResult(event) {
 
   state.recognitionSegments = merged.segments;
   state.recognitionCommittedTranscript = merged.committedTranscript;
-  state.liveTranscriptBackup = merged.transcript;
+  state.liveTranscriptRaw = merged.transcript;
+  state.transcript = merged.transcript;
+  els.transcript.value = merged.transcript;
   state.pendingLineBreakBeforeNextSpeech = false;
 
   if (!state.isTranscribing) {
-    setStatus('녹음 중입니다. 정지하면 녹음 파일을 STT로 다시 읽습니다.');
+    setStatus('녹음 중입니다. 정지하면 실시간 원문과 녹음 파일 STT를 비교합니다.');
   }
 }
 
@@ -279,19 +292,22 @@ function onRecognitionEnd() {
 
 function onTranscriptEdit() {
   state.transcript = els.transcript.value;
-  state.liveTranscriptBackup = els.transcript.value;
+  state.liveTranscriptRaw = els.transcript.value;
   state.recognitionSegments = [{ transcript: els.transcript.value, isFinal: true }];
   state.recognitionCommittedTranscript = els.transcript.value;
+  state.recoveredTranscript = '';
+  state.transcriptComparison = null;
   if (state.readyForVariants) {
     state.variants = [];
     state.confirmedSummary = '';
     renderVariantPlaceholder('원문이 바뀌었습니다. 변환 버튼을 다시 눌러 주세요.');
     renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
   }
+  refreshTranscriptComparison();
 }
 
 function renderVariants() {
-  const transcript = els.transcript.value || state.transcript;
+  const transcript = getRewriteSourceText();
 
   if (!state.readyForVariants) {
     state.variants = [];
@@ -434,7 +450,7 @@ function markChangedTokens(sourceTokens, variantTokens) {
 
 async function handleGenerateClicked() {
   state.readyForVariants = true;
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  const transcript = getRewriteSourceText();
 
   if (!transcript) {
     state.variants = [];
@@ -459,7 +475,7 @@ async function handleGenerateClicked() {
 }
 
 async function copySelectedVariant() {
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  const transcript = getRewriteSourceText();
   if (!transcript) {
     setStatus('먼저 원문이 있어야 복사할 수 있습니다.');
     return;
@@ -472,7 +488,7 @@ async function copySelectedVariant() {
 }
 
 async function copyVariant(variant) {
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  const transcript = getRewriteSourceText();
   if (!transcript) {
     setStatus('먼저 원문이 있어야 복사할 수 있습니다.');
     return;
@@ -498,7 +514,7 @@ async function copyVariant(variant) {
 }
 
 async function confirmVariant(variant) {
-  const transcript = normalizeWhitespace(els.transcript.value || state.transcript);
+  const transcript = getRewriteSourceText();
   if (!transcript) {
     setStatus('먼저 원문이 있어야 확정할 수 있습니다.');
     return;
@@ -527,10 +543,6 @@ async function confirmVariant(variant) {
     state.isSummarizing = false;
     setActionControlsDisabled(false);
   }
-}
-
-async function handleConfirmClicked() {
-  await confirmVariant();
 }
 
 function createSpeechRecognition() {
@@ -571,6 +583,27 @@ function setTranscript(value) {
   els.transcript.value = value;
 }
 
+function getRewriteSourceText() {
+  return normalizeWhitespace(state.recoveredTranscript || els.transcript.value || state.liveTranscriptRaw || state.transcript);
+}
+
+function refreshTranscriptComparison() {
+  const liveTranscript = normalizeWhitespace(state.liveTranscriptRaw || els.transcript.value || state.transcript);
+  const recordedTranscript = normalizeWhitespace(state.recordedTranscriptRaw || '');
+
+  if (!liveTranscript && !recordedTranscript) {
+    state.recoveredTranscript = '';
+    state.transcriptComparison = null;
+    renderTranscriptComparison();
+    return;
+  }
+
+  const comparison = compareTranscriptSources(liveTranscript, recordedTranscript, state.transcript);
+  state.transcriptComparison = comparison;
+  state.recoveredTranscript = comparison.recoveredText || liveTranscript || recordedTranscript;
+  renderTranscriptComparison();
+}
+
 function syncTranscriptDisplay(nextValue) {
   const currentValue = els.transcript.value || '';
   const targetValue = String(nextValue ?? '');
@@ -598,6 +631,35 @@ function renderVariantPlaceholder(message) {
   els.emptyState.hidden = false;
   els.emptyState.textContent = message;
   setActionControlsDisabled(false);
+}
+
+function renderTranscriptComparison() {
+  const liveText = state.liveTranscriptRaw || els.transcript.value || '';
+  const recordedText = state.recordedTranscriptRaw || '';
+  const recoveredText = state.recoveredTranscript || '';
+
+  if (els.liveTranscript) {
+    els.liveTranscript.textContent = liveText || '실시간 받아쓰기가 여기에 표시됩니다.';
+  }
+
+  if (els.recordedTranscript) {
+    els.recordedTranscript.textContent = recordedText || '녹음이 끝나면 파일 기반 STT 결과가 여기에 표시됩니다.';
+  }
+
+  if (els.recoveredTranscript) {
+    els.recoveredTranscript.textContent = recoveredText || '실시간 STT와 녹음 STT를 비교해 복구하면 여기에 표시됩니다.';
+  }
+
+  if (els.transcriptComparisonStatus) {
+    if (!state.transcriptComparison) {
+      els.transcriptComparisonStatus.textContent = '실시간 원문과 녹음 파일 STT를 각각 비교합니다.';
+      return;
+    }
+
+    const { chosenSource, liveScore, recordedScore, summary } = state.transcriptComparison;
+    const pickedLabel = chosenSource === 'recorded' ? '녹음 파일 STT' : '실시간 받아쓰기';
+    els.transcriptComparisonStatus.textContent = `${pickedLabel}를 기준으로 복구합니다. ${summary} (실시간 ${liveScore.toFixed(2)} · 녹음 ${recordedScore.toFixed(2)})`;
+  }
 }
 
 function renderConfirmedSummary(summaryText, sourceLabel) {
@@ -645,7 +707,7 @@ function chooseConfirmationSummary(remoteSummaryText, localSummary, selectedText
 }
 
 function setActionControlsDisabled(isBusy) {
-  const hasTranscript = Boolean(normalizeWhitespace(els.transcript.value || state.transcript));
+  const hasTranscript = Boolean(getRewriteSourceText());
   const hasVariants = state.variants.length > 0;
   const busy = Boolean(isBusy || state.isTranscribing);
   els.generateButton.disabled = busy || !hasTranscript;
