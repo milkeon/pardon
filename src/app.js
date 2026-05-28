@@ -1,6 +1,6 @@
 import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-12';
 import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-12';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-12';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-14';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
