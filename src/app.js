@@ -1,7 +1,7 @@
-import { buildRewriteVariants, buildTranscriptDiff, normalizeWhitespace, renderTranscriptDiff } from './rewrite.js?v=stt-diff-25';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-diff-25';
-import { mergeRecognitionResults } from './stt.js?v=stt-diff-25';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-diff-25';
+import { buildRewriteVariants, buildTranscriptDiff, normalizeWhitespace, renderTranscriptDiff } from './rewrite.js?v=stt-diff-26';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-diff-26';
+import { mergeRecognitionResults } from './stt.js?v=stt-diff-26';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-diff-26';
 
 const testHooks = getTestHooks();
 
@@ -412,37 +412,32 @@ function renderVariantCards(segments) {
   diffSegments.forEach((segment, index) => {
     const choice = state.diffSelections[segment.id] || state.diffModel?.preferredSource || 'right';
     const card = document.createElement('article');
-    card.className = `variant-card is-selected`;
+    card.className = `variant-card${choice ? ' is-selected' : ''}`;
     card.dataset.diffId = segment.id;
+    card.dataset.selectedSource = choice;
     card.innerHTML = `
       <div class="variant-card__body">
         <span class="variant-card__label">차이 ${index + 1}</span>
         <span class="variant-card__meta">원문 ${segment.leftTokens.length || 0}개 · 녹음 ${segment.rightTokens.length || 0}개</span>
-        <div class="diff-compare">
-          <div class="diff-compare__side">
+        <div class="diff-compare" role="group" aria-label="차이 ${index + 1} 선택">
+          <button type="button" class="diff-compare__side ${choice === 'left' ? 'is-selected' : ''}" data-action="choose-left" aria-pressed="${choice === 'left'}">
             <span class="diff-compare__label">원문 STT</span>
-            <p class="diff-compare__text ${choice === 'left' ? 'is-selected' : ''}">${escapeHtml(segment.leftText || '비어 있음')}</p>
-          </div>
-          <div class="diff-compare__side">
+            <span class="diff-compare__text">${escapeHtml(segment.leftText || '비어 있음')}</span>
+          </button>
+          <button type="button" class="diff-compare__side ${choice === 'right' ? 'is-selected' : ''}" data-action="choose-right" aria-pressed="${choice === 'right'}">
             <span class="diff-compare__label">녹음 STT</span>
-            <p class="diff-compare__text ${choice === 'right' ? 'is-selected' : ''}">${escapeHtml(segment.rightText || '비어 있음')}</p>
-          </div>
+            <span class="diff-compare__text">${escapeHtml(segment.rightText || '비어 있음')}</span>
+          </button>
         </div>
-        <span class="variant-card__diff">이 부분만 바뀝니다. 둘 중 하나를 고르세요.</span>
-      </div>
-      <div class="variant-card__actions">
-        <button class="button button--small ${choice === 'left' ? 'button--primary' : ''}" type="button" data-action="choose-left">원문 사용</button>
-        <button class="button button--small ${choice === 'right' ? 'button--primary' : ''}" type="button" data-action="choose-right">녹음 사용</button>
+        <span class="variant-card__diff">카드를 직접 눌러 선택하세요. 선택된 쪽이 네온으로 표시됩니다.</span>
       </div>
     `;
 
-    card.querySelector('[data-action="choose-left"]')?.addEventListener('click', (event) => {
-      event.stopPropagation();
+    card.querySelector('[data-action="choose-left"]')?.addEventListener('click', () => {
       setDiffChoice(segment.id, 'left');
     });
 
-    card.querySelector('[data-action="choose-right"]')?.addEventListener('click', (event) => {
-      event.stopPropagation();
+    card.querySelector('[data-action="choose-right"]')?.addEventListener('click', () => {
       setDiffChoice(segment.id, 'right');
     });
 
@@ -526,10 +521,10 @@ function markChangedTokens(sourceTokens, variantTokens) {
 
 function handleGenerateClicked() {
   state.readyForVariants = true;
-  const rawTranscript = normalizeWhitespace(state.rawTranscript);
-  const cleanedTranscript = normalizeWhitespace(state.cleanedTranscript);
+  const liveTranscript = normalizeWhitespace(state.transcript || state.liveTranscriptRaw);
+  const recordedTranscript = normalizeWhitespace(state.rawTranscript);
 
-  if (!rawTranscript || !cleanedTranscript) {
+  if (!liveTranscript || !recordedTranscript) {
     state.diffModel = null;
     state.diffSelections = {};
     renderVariantPlaceholder('먼저 원문 STT와 녹음 STT가 둘 다 있어야 변환할 수 있습니다.');
@@ -538,7 +533,7 @@ function handleGenerateClicked() {
     return;
   }
 
-  state.diffModel = buildTranscriptDiff(state.rawTranscript, state.cleanedTranscript, state.liveTranscriptRaw || state.transcript);
+  state.diffModel = buildTranscriptDiff(liveTranscript, recordedTranscript, `${liveTranscript} ${recordedTranscript}`);
   state.diffSelections = { ...state.diffModel.selection };
   renderVariants();
   setStatus(state.diffModel.changeCount > 0

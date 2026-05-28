@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-const fakeTranscript = 'Please fix the redirect issue and send the update to the team. 리사이젝트도 정리해 주세요.';
+const fakeLiveTranscript = '자 이제 잘 되는지 한 번 테스트를 해볼 건데 원문 stt와 녹음 stt에 합치 테스트를 해볼거야';
+const fakeRecordedTranscript = '자 이제 잘 되는지 한 번 테스트를 해볼 건데 원문 stt와 녹음 stt에 압치 테스트를 해볼거야';
 const fakeVariants = [
   {
     id: 'possibility-1',
@@ -20,7 +21,7 @@ const fakeVariants = [
 ];
 
 function installBrowserMocks(page) {
-  return page.addInitScript(({ fakeTranscript, fakeVariants }) => {
+  return page.addInitScript(({ fakeLiveTranscript, fakeRecordedTranscript, fakeVariants }) => {
     const makeEmitter = () => {
       const handlers = new Map();
       return {
@@ -54,7 +55,7 @@ function installBrowserMocks(page) {
           resultIndex: 0,
           results: [
             {
-              0: { transcript: fakeTranscript },
+              0: { transcript: fakeLiveTranscript },
               isFinal: true
             }
           ]
@@ -109,7 +110,7 @@ function installBrowserMocks(page) {
 
     Object.defineProperty(window, '__PARDON_TEST_HOOKS__', {
       value: {
-        transcribeAudioBlob: async () => fakeTranscript,
+        transcribeAudioBlob: async () => fakeRecordedTranscript,
         fetchRewriteVariants: async () => fakeVariants,
         fetchConfirmationSummary: async () => ({
           title: '확정 요약',
@@ -131,7 +132,7 @@ function installBrowserMocks(page) {
     window.SpeechRecognition = FakeSpeechRecognition;
     window.webkitSpeechRecognition = FakeSpeechRecognition;
     window.MediaRecorder = FakeMediaRecorder;
-  }, { fakeTranscript, fakeVariants });
+  }, { fakeLiveTranscript, fakeRecordedTranscript, fakeVariants });
 }
 
 test('Pardon은 콘솔 에러 없이 기본 UI를 렌더한다', async ({ page }) => {
@@ -164,23 +165,29 @@ test('Pardon은 녹음 → 정지 → STT → 변환 → 확정 흐름을 테스
 
   await page.getByRole('button', { name: '녹음 시작' }).click();
   await expect(page.getByRole('button', { name: '정지' })).toBeEnabled();
-  await expect(page.getByRole('textbox', { name: '실시간 원문' })).toHaveValue(fakeTranscript);
+  await expect(page.getByRole('textbox', { name: '실시간 원문' })).toHaveValue(fakeLiveTranscript);
 
   await page.getByRole('button', { name: '정지' }).click();
   const sttButton = page.getByRole('button', { name: 'STT', exact: true });
   await expect(sttButton).toBeEnabled();
 
   await sttButton.click();
-  await expect(page.locator('#recorded-transcript')).toHaveText(fakeTranscript);
+  await expect(page.locator('#recorded-transcript')).toHaveText(fakeRecordedTranscript);
 
   await page.getByRole('button', { name: '변환' }).click();
   await expect(page.locator('#variant-list .variant-card')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: '원문 사용' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '녹음 사용' })).toBeVisible();
-  await expect(page.locator('#confirmed-summary')).toContainText(fakeTranscript);
+  await expect(page.getByRole('button', { name: /원문 STT/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /녹음 STT/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /합치/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /압치/ })).toBeVisible();
 
-  await page.getByRole('button', { name: '녹음 사용' }).click();
-  await expect(page.locator('#confirmed-summary')).toContainText('리다이렉트 문제를 수정하고 업데이트를 팀에 보내야 합니다.');
+  await page.locator('[data-action="choose-left"]').click();
+  await expect(page.locator('[data-action="choose-left"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#confirmed-summary')).toContainText('합치');
+
+  await page.locator('[data-action="choose-right"]').click();
+  await expect(page.locator('[data-action="choose-right"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#confirmed-summary')).toContainText('압치');
 
   expect(errors).toEqual([]);
 });
