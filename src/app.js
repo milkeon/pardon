@@ -1,11 +1,13 @@
-import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-9';
-import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-9';
-import { transcribeAudioBlob } from './asr.js?v=confirm-llm-9';
+import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=confirm-llm-10';
+import { fetchConfirmationSummary, fetchRewriteVariants } from './llm.js?v=confirm-llm-10';
+import { transcribeAudioBlob } from './asr.js?v=confirm-llm-10';
+import { mergeRecognitionResults } from './stt.js?v=confirm-llm-5';
 import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-5';
 
 const els = {
   startButton: document.querySelector('[data-action="start-recording"]'),
   stopButton: document.querySelector('[data-action="stop-recording"]'),
+  transcript: document.querySelector('#transcript'),
   transcribeButton: document.querySelector('[data-action="transcribe-recording"]'),
   clearButton: document.querySelector('[data-action="clear"]'),
   generateButton: document.querySelector('[data-action="generate"]'),
@@ -32,10 +34,18 @@ const state = {
   audioAnalyser: null,
   audioSamples: null,
   chunks: [],
+  transcript: '',
   recordedAudioBlob: null,
   rawTranscript: '',
   cleanedTranscript: '',
   transcriptComparison: null,
+  recognition: null,
+  liveTranscriptRaw: '',
+  recordedTranscriptRaw: '',
+  recoveredTranscript: '',
+  recognitionSegments: [],
+  recognitionCommittedTranscript: '',
+  liveTranscriptBackup: '',
   selectedTranscriptSource: 'cleaned',
   selectedVariantId: 'possibility-1',
   selectedAudioUrl: '',
@@ -74,6 +84,7 @@ function initialize() {
 function wireEvents() {
   els.startButton.addEventListener('click', startCapture);
   els.stopButton.addEventListener('click', stopCapture);
+  els.transcript.addEventListener('input', onTranscriptEdit);
   els.transcribeButton.addEventListener('click', handleTranscribeClicked);
   els.clearButton.addEventListener('click', clearAll);
   els.generateButton.addEventListener('click', handleGenerateClicked);
@@ -97,8 +108,17 @@ async function startCapture() {
 
     await startVoiceActivityMonitor();
 
+    const recognition = createSpeechRecognition();
+    state.recognition = recognition;
+    if (recognition) {
+      recognition.onresult = onRecognitionResult;
+      recognition.onerror = onRecognitionError;
+      recognition.onend = onRecognitionEnd;
+      recognition.start();
+    }
+
     setRecording(true);
-    setStatus('녹음을 시작했습니다. 정지하면 오디오 옆 STT 버튼으로 파일 전사를 합니다.');
+    setStatus('녹음을 시작했습니다. 위쪽 실시간 원문은 계속 표시되고, 정지하면 오디오 옆 STT 버튼으로 파일 전사를 합니다.');
   } catch (error) {
     setStatus(`녹음을 시작할 수 없습니다: ${friendlyError(error)}`);
     cleanupAudioActivityMonitor();
@@ -111,6 +131,15 @@ function stopCapture() {
   state.recognitionRestartTimer = null;
 
   cleanupAudioActivityMonitor();
+
+  if (state.recognition) {
+    try {
+      state.recognition.stop();
+    } catch {
+      // ignore
+    }
+    state.recognition = null;
+  }
 
   if (state.recorder && state.recorder.state !== 'inactive') {
     try {
@@ -149,10 +178,18 @@ function clearAll() {
 
 function clearSessionState() {
   state.chunks = [];
+  state.transcript = '';
   state.recordedAudioBlob = null;
   state.rawTranscript = '';
   state.cleanedTranscript = '';
   state.transcriptComparison = null;
+  state.recognition = null;
+  state.liveTranscriptRaw = '';
+  state.recordedTranscriptRaw = '';
+  state.recoveredTranscript = '';
+  state.recognitionSegments = [];
+  state.recognitionCommittedTranscript = '';
+  state.liveTranscriptBackup = '';
   state.selectedTranscriptSource = 'cleaned';
   state.variants = [];
   state.confirmedSummary = '';
@@ -161,6 +198,9 @@ function clearSessionState() {
   state.lastVoiceAt = 0;
   state.pendingLineBreakBeforeNextSpeech = false;
   state.audioVoiceActive = false;
+  if (els.transcript) {
+    els.transcript.value = '';
+  }
   setAudioUrl('');
   renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
   renderTranscriptComparison();
@@ -564,9 +604,11 @@ function createSpeechRecognition() {
 
 function updateSupportStatus() {
   const hasRecorder = typeof MediaRecorder !== 'undefined';
+  const hasRecognition = typeof SpeechRecognition !== 'undefined' || typeof webkitSpeechRecognition !== 'undefined';
 
   els.supportStatus.textContent = [
     hasRecorder ? 'MediaRecorder: 지원됨' : 'MediaRecorder: 지원 안 됨',
+    hasRecognition ? 'SpeechRecognition: 지원됨' : 'SpeechRecognition: 지원 안 됨',
     '파일 STT: STT 버튼으로 실행'
   ].join(' · ');
 }
@@ -582,11 +624,18 @@ function setStatus(message) {
 }
 
 function setTranscript(value) {
-  state.rawTranscript = value;
-  state.cleanedTranscript = value;
+  state.transcript = String(value ?? '');
+  state.liveTranscriptRaw = state.transcript;
+  if (els.transcript) {
+    els.transcript.value = state.transcript;
+  }
 }
 
 function getRewriteSourceText() {
+  if (normalizeWhitespace(state.transcript)) {
+    return normalizeWhitespace(state.transcript);
+  }
+
   if (!state.transcriptComparison) {
     return '';
   }

@@ -10,7 +10,9 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('<h1>Pardon</h1>'));
   assert.ok(html.includes('녹음 시작'));
   assert.ok(html.includes('변환'));
-  assert.ok(html.includes('녹음 파일 STT'));
+  assert.ok(html.includes('실시간 원문'));
+  assert.ok(html.includes('원문 STT'));
+  assert.ok(html.includes('녹음된 오디오'));
   assert.ok(html.includes('STT</button>'));
   assert.ok(html.includes('원문 STT / 녹음 STT'));
   assert.ok(html.includes('제안 3가지'));
@@ -24,14 +26,13 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(appJs.includes('data-action="transcribe-recording"'));
   assert.ok(appJs.includes('transcribeAudioBlob'));
   assert.ok(html.includes('id="toast"'));
-  assert.ok(!html.includes('녹음이 진행되는 동안 실시간 받아쓰기 결과가 여기에 표시됩니다.'));
-  assert.ok(!html.includes('id="transcript"'));
-  assert.ok(!html.includes('실시간 원문'));
+  assert.ok(html.includes('녹음이 진행되는 동안 실시간 받아쓰기 결과가 여기에 표시됩니다.'));
+  assert.ok(html.includes('id="transcript"'));
   assert.ok(html.includes('class="transcript-actions"'));
   assert.ok(html.indexOf('data-action="generate"') < html.indexOf('data-action="clear"'));
 });
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=confirm-llm-9'));
+  assert.ok(html.includes('./src/app.js?v=confirm-llm-10'));
 });
