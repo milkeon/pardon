@@ -9,14 +9,14 @@ export async function transcribeAudioBlob(blob, options = {}) {
 
   const chunks = normalizeBlobChunks(options.chunks);
   if (chunks.length > 0) {
-    return transcribeChunkBlobs(chunks, options);
+    return transcribeChunkBlobs(blob, chunks, options);
   }
 
   return transcribeBlob(blob, options);
 }
 
-async function transcribeChunkBlobs(chunks, options = {}) {
-  const transcriber = await getTranscriber();
+async function transcribeChunkBlobs(sourceBlob, chunks, options = {}) {
+  const transcriber = options.transcriber || (await getTranscriber());
   const batchSize = normalizePositiveNumber(options.batchSize, DEFAULT_BATCH_SIZE);
   const chunkLengthSeconds = normalizePositiveNumber(options.chunkLengthSeconds, DEFAULT_CHUNK_LENGTH_SECONDS);
   const transcriptParts = [];
@@ -51,7 +51,16 @@ async function transcribeChunkBlobs(chunks, options = {}) {
     options.onProgress({ currentBatch: totalBatches, totalBatches });
   }
 
-  return normalizeTranscript(transcriptParts.join(' '));
+  const chunkTranscript = normalizeTranscript(transcriptParts.join(' '));
+  if (chunkTranscript) {
+    return chunkTranscript;
+  }
+
+  return transcribeBlob(sourceBlob, {
+    transcriber,
+    chunkLengthSeconds,
+    returnEmptyOnError: options.returnEmptyOnError
+  });
 }
 
 async function transcribeBlob(blob, options = {}) {
