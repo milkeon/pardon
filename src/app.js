@@ -2,7 +2,7 @@ import { buildConfirmationSummary, buildRewriteVariants, normalizeWhitespace } f
 import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=confirm-llm-20';
 import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=confirm-llm-20';
 import { mergeRecognitionResults } from './stt.js?v=confirm-llm-20';
-import { calculateRms, hasTimedOutSince, shouldRestartRecognition } from './capture.js?v=confirm-llm-20';
+import { calculateRms, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=confirm-llm-20';
 
 const testHooks = getTestHooks();
 
@@ -842,9 +842,67 @@ function updateTranscribeButtonState() {
 }
 
 async function startVoiceActivityMonitor() {
-  // WebAudio 기반 무음 감시기는 일부 브라우저에서 내부 AudioContext 오류를
-  // 반복적으로 유발할 수 있어서 비활성화합니다.
-  return;
+  cleanupAudioActivityMonitor();
+
+  if (!state.stream) {
+    return;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  try {
+    state.audioContext = new AudioContextCtor();
+    state.audioSource = state.audioContext.createMediaStreamSource(state.stream);
+    state.audioAnalyser = state.audioContext.createAnalyser();
+    state.audioAnalyser.fftSize = 1024;
+    state.audioSamples = new Uint8Array(state.audioAnalyser.fftSize);
+    state.audioSource.connect(state.audioAnalyser);
+    state.lastVoiceAt = Date.now();
+    state.audioVoiceActive = false;
+
+    state.voiceMonitorTimer = window.setInterval(() => {
+      if (!state.audioAnalyser || !state.audioSamples) {
+        return;
+      }
+
+      if (!state.stream || state.isStopping) {
+        cleanupAudioActivityMonitor();
+        return;
+      }
+
+      state.audioAnalyser.getByteTimeDomainData(state.audioSamples);
+      const rms = calculateRms(Array.from(state.audioSamples, (sample) => (sample - 128) / 128));
+      const now = Date.now();
+      const isSpeaking = rms >= VOICE_LEVEL_THRESHOLD;
+      const wasSpeaking = state.audioVoiceActive;
+
+      if (isSpeaking) {
+        if (shouldInsertLineBreakBeforeNextSpeech({
+          hasTranscript: Boolean(state.recognitionCommittedTranscript),
+          wasSpeaking,
+          isSpeaking,
+          lastVoiceAt: state.lastVoiceAt,
+          now,
+          silenceMs: 1000
+        })) {
+          state.pendingLineBreakBeforeNextSpeech = true;
+        }
+
+        state.lastVoiceAt = now;
+        state.audioVoiceActive = true;
+        return;
+      }
+
+      if (wasSpeaking) {
+        state.audioVoiceActive = false;
+      }
+    }, VOICE_CHECK_INTERVAL_MS);
+  } catch {
+    cleanupAudioActivityMonitor();
+  }
 }
 
 function cleanupAudioActivityMonitor() {
