@@ -48,11 +48,11 @@ Pardon은 기본적으로 **키 없이도** 동작합니다.
   - 로컬 결정적 폴백
   - 로컬 OpenAI 호환 서버(Ollama, LM Studio, llama.cpp 등)
 
-로컬 LLM 서버를 붙이려면 `.env`에 아래처럼 적습니다.
+- 로컬 LLM 서버를 붙이려면 `.env`에 아래처럼 적습니다. Qwen2.5 7B Instruct를 기본 추천 모델로 씁니다.
 
 ```bash
 LOCAL_LLM_BASE_URL=http://localhost:11434/v1
-LOCAL_LLM_MODEL=llama3.2:3b
+LOCAL_LLM_MODEL=qwen2.5:7b-instruct
 ```
 
 - Ollama를 쓰면 보통 `http://localhost:11434/v1`를 씁니다.

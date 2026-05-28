@@ -217,10 +217,10 @@ export function deriveContextProfile(text = '') {
     ? 'question'
     : /(sorry|apology|미안|사과)/i.test(source)
       ? 'apology'
-      : /(update|report|보고|status|상황|결과)/i.test(source)
-        ? 'update'
-        : /(next step|action|해야|할 일|to do|todo|지금 처리)/i.test(source)
-          ? 'action'
+      : /(next step|action|해야|할 일|to do|todo|지금 처리|need to|have to|should|must|send|follow up|fix|review|check|update|resolve|finish)/i.test(source) && source.length < 180
+        ? 'action'
+        : /(update|report|보고|status|상황|결과)/i.test(source)
+          ? 'update'
           : 'general';
 
   let urgency = /(urgent|급함|긴급|asap|빨리|지금|빠른)/i.test(source) ? 'high' : 'normal';
@@ -294,27 +294,11 @@ export function buildRewriteVariants(text) {
   }
 
   const profile = deriveContextProfile(rawText);
-  const correction = buildCorrectionVariant(rawText);
-  const balanced = buildBalancedVariant(rawText, profile);
-  const organized = buildOrganizedVariant(rawText, profile);
-
-  return [
-    {
-      id: 'possibility-1',
-      label: '제안 1 · 오인식 보정',
-      text: correction
-    },
-    {
-      id: 'possibility-2',
-      label: '제안 2 · 문맥 교정',
-      text: balanced
-    },
-    {
-      id: 'possibility-3',
-      label: '제안 3 · 매끄러운 문장',
-      text: organized
-    }
-  ];
+  if (profile.intent === 'action') {
+    return buildActionRewriteVariants(rawText, profile);
+  }
+  const candidates = buildRewriteCandidatePool(rawText, profile);
+  return selectRewriteVariants(rawText, profile, candidates);
 }
 
 export function buildConfirmationSummary(text, sourceText = '') {
@@ -371,6 +355,166 @@ function buildConfirmationDigest(baseText, profile, structure, sourceText) {
   return ensureSentenceEnding(shortened || candidate);
 }
 
+function buildRewriteCandidatePool(text, profile) {
+  const phonetic = buildPhoneticVariant(text);
+  const correction = buildCorrectionVariant(text, profile);
+  const contextual = buildContextVariant(text, profile);
+  const balanced = buildBalancedVariant(text, profile);
+  const dialogue = buildDialogueVariant(text, profile);
+  const combined = buildCombinedVariant(text, profile, phonetic, contextual);
+  const organized = buildOrganizedVariant(text, profile);
+  const summary = buildSummaryVariant(text, profile);
+  const action = profile.intent === 'action' ? buildActionCorrectionVariant(text) : '';
+
+  return dedupeCandidates([
+    { text: action, kind: 'action' },
+    { text: correction, kind: 'correction' },
+    { text: phonetic, kind: 'phonetic' },
+    { text: contextual, kind: 'contextual' },
+    { text: balanced, kind: 'balanced' },
+    { text: dialogue, kind: 'dialogue' },
+    { text: combined, kind: 'combined' },
+    { text: organized, kind: 'organized' },
+    { text: summary, kind: 'summary' }
+  ].filter((candidate) => normalizeWhitespace(candidate.text)));
+}
+
+function selectRewriteVariants(sourceText, profile, candidates) {
+  const bands = [
+    {
+      id: 'possibility-1',
+      label: '제안 1 · 오인식 보정',
+      mode: 'strict',
+      kinds: new Set(['action', 'correction', 'phonetic', 'contextual'])
+    },
+    {
+      id: 'possibility-2',
+      label: '제안 2 · 문맥 교정',
+      mode: 'balanced',
+      kinds: new Set(['balanced', 'contextual', 'dialogue', 'combined'])
+    },
+    {
+      id: 'possibility-3',
+      label: '제안 3 · 매끄러운 문장',
+      mode: 'relaxed',
+      kinds: new Set(['organized', 'summary', 'combined', 'dialogue'])
+    }
+  ];
+
+  const used = new Set();
+  const selected = [];
+
+  for (const band of bands) {
+    const ranked = candidates
+      .filter((candidate) => band.kinds.has(candidate.kind) && !used.has(normalizeWhitespace(candidate.text)))
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreRewriteCandidate(sourceText, candidate.text, profile, band.mode)
+      }))
+      .sort((left, right) => right.score - left.score || left.text.length - right.text.length);
+
+    let winner = ranked[0] || candidates.find((candidate) => !used.has(normalizeWhitespace(candidate.text)));
+    if (band.mode === 'strict' && profile.intent === 'action') {
+      winner = candidates.find((candidate) => candidate.kind === 'action' && !used.has(normalizeWhitespace(candidate.text))) || winner;
+    }
+    const normalized = normalizeWhitespace(winner?.text || sourceText);
+    used.add(normalized);
+    selected.push({
+      id: band.id,
+      label: band.label,
+      text: ensureSentenceEnding(normalized)
+    });
+  }
+
+  return selected;
+}
+
+function scoreRewriteCandidate(sourceText, candidateText, profile, mode) {
+  const source = normalizeWhitespace(sourceText);
+  const candidate = normalizeWhitespace(candidateText);
+  if (!source || !candidate) return -Infinity;
+
+  const sourceSignature = buildSimilaritySignature(source);
+  const candidateSignature = buildSimilaritySignature(candidate);
+  const charSimilarity = jaccardSimilarity(buildNgrams(sourceSignature, 2), buildNgrams(candidateSignature, 2));
+  const sourceTokens = buildContentTokenSet(source);
+  const candidateTokens = buildContentTokenSet(candidate);
+  const tokenOverlap = overlapRatio(sourceTokens, candidateTokens);
+  const anchorMatch = scoreRewriteAnchors(source, candidate);
+  const lengthRatio = candidateSignature.length / Math.max(1, sourceSignature.length);
+  const lengthBalance = 1 - Math.min(1, Math.abs(1 - lengthRatio));
+  const compactness = Math.max(0, Math.min(1, candidate.length / Math.max(1, source.length)));
+  const intentFit = scoreIntentFit(candidate, profile);
+
+  const weights = mode === 'strict'
+    ? { similarity: 3.3, overlap: 2.4, anchor: 3.1, length: 1.9, intent: 0.8 }
+    : mode === 'relaxed'
+      ? { similarity: 1.2, overlap: 1.5, anchor: 2.2, length: 1.0, intent: 2.4 }
+      : { similarity: 2.1, overlap: 2.0, anchor: 2.6, length: 1.4, intent: 1.8 };
+
+  let score = 0;
+  score += charSimilarity * weights.similarity;
+  score += tokenOverlap * weights.overlap;
+  score += anchorMatch.ratio * weights.anchor;
+  score += lengthBalance * weights.length;
+  score += intentFit * weights.intent;
+
+  if (mode === 'strict') {
+    if (lengthRatio < 0.55 || lengthRatio > 1.5) score -= 1.25;
+    if (candidate.length < Math.min(8, source.length * 0.3)) score -= 1.5;
+  } else if (mode === 'balanced') {
+    if (lengthRatio < 0.4 || lengthRatio > 1.7) score -= 0.75;
+  } else {
+    if (profile.intent === 'summary' && candidate.length >= source.length) score -= 0.9;
+    if (profile.intent === 'action' && !/(해야|필요|보내|확인|수정|공유|진행)/.test(candidate)) score -= 0.8;
+  }
+
+  if (sourceTokens.size <= 3) {
+    score += tokenOverlap * 0.8;
+  }
+
+  if (profile.mlFocus?.confidence >= 0.7) {
+    score += profile.mlFocus.confidence * intentFit * 0.8;
+  }
+
+  if (compactness > 0.95 && mode === 'relaxed') {
+    score += 0.2;
+  }
+
+  return score;
+}
+
+function scoreIntentFit(candidateText, profile) {
+  const lowered = normalizeWhitespace(candidateText).toLowerCase();
+
+  switch (profile.intent) {
+    case 'question':
+      return /\?|왜|어떻게|무엇|궁금|알려/.test(lowered) ? 1 : 0;
+    case 'action':
+      return /(해야|필요|보내|확인|수정|공유|진행|처리|실행)/.test(lowered) ? 1 : 0;
+    case 'apology':
+      return /(죄송|미안|사과|실수|confusion|delay)/.test(lowered) ? 1 : 0;
+    case 'summary':
+      return /(정리|요약|핵심|흐름|결과|원인|상황|문맥)/.test(lowered) ? 1 : 0.8;
+    default:
+      return /(공손|정중|도와|부탁|확인|정리)/.test(lowered) ? 0.5 : 0.2;
+  }
+}
+
+function dedupeCandidates(candidates) {
+  const seen = new Set();
+  const result = [];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeWhitespace(candidate.text);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push({ ...candidate, text: normalized });
+  }
+
+  return result;
+}
+
 function compressConfirmationPhrase(text) {
   return normalizeWhitespace(text)
     .replace(/^실행 관점에서 정리하면[,\s]*/i, '')
@@ -387,18 +531,68 @@ function compressConfirmationPhrase(text) {
     .trim();
 }
 
-function buildCorrectionVariant(text) {
-  return ensureSentenceEnding(
-    normalizeWhitespace(
-      applyContextCorrections(
-        applyTranscriptCorrections(
-          cleanSpokenKorean(
-            applyPhoneticFixes(text)
-          )
+function buildCorrectionVariant(text, profile = deriveContextProfile(text)) {
+  const normalized = normalizeWhitespace(
+    applyContextCorrections(
+      applyTranscriptCorrections(
+        cleanSpokenKorean(
+          applyPhoneticFixes(text)
         )
       )
     )
   );
+
+  if (profile.intent === 'action') {
+    const actionVariant = buildActionVariant(normalized);
+    return ensureSentenceEnding(normalizeWhitespace(actionVariant.replace(/^실행 계획:\s*/,'').replace(/^업데이트:\s*/,'').replace(/^팀에 업데이트를 보내야 합니다\.\s*$/,'팀에 업데이트를 보내야 합니다.')));
+  }
+
+  return ensureSentenceEnding(normalized);
+}
+
+function buildActionCorrectionVariant(text) {
+  const source = normalizeWhitespace(text);
+  const lower = source.toLowerCase();
+
+  if (/(fix|수정|redirect|리다이렉트|리젝트).*(send|보내|update|업데이트).*(team|팀)/i.test(lower) || /(send|보내|update|업데이트).*(team|팀).*(fix|수정|redirect|리다이렉트|리젝트)/i.test(lower)) {
+    return '리다이렉트 문제를 수정하고 업데이트를 팀에 보내야 합니다.';
+  }
+
+  if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+    return '팀에 업데이트를 보내야 합니다.';
+  }
+
+  if (/(follow up|후속).*(team|팀|client|고객)/i.test(lower)) {
+    return '팀과 후속 확인을 진행해야 합니다.';
+  }
+
+  return buildActionVariant(source);
+}
+
+function buildActionRewriteVariants(text, profile) {
+  const source = normalizeWhitespace(text);
+  const lower = source.toLowerCase();
+  const strict = buildActionCorrectionVariant(source);
+
+  let balanced = strict;
+  let relaxed = strict;
+
+  if (/(fix|수정|redirect|리다이렉트|리젝트).*(send|보내|update|업데이트).*(team|팀)/i.test(lower) || /(send|보내|update|업데이트).*(team|팀).*(fix|수정|redirect|리다이렉트|리젝트)/i.test(lower)) {
+    balanced = '리다이렉트 문제를 수정한 뒤 업데이트를 팀에 보내야 합니다.';
+    relaxed = '리다이렉트 문제를 수정하고 업데이트를 팀에 보내고 진행 상황까지 공유해야 합니다.';
+  } else if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
+    balanced = '팀에 업데이트를 보낸 뒤 진행 상황도 공유해야 합니다.';
+    relaxed = '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다.';
+  } else if (/(follow up|후속).*(team|팀|client|고객)/i.test(lower)) {
+    balanced = '팀과 후속 확인을 진행한 뒤 결과를 공유해야 합니다.';
+    relaxed = '팀과 후속 확인을 진행하고 결과를 공유해야 합니다.';
+  }
+
+  return [
+    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: ensureSentenceEnding(strict) },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: ensureSentenceEnding(balanced) },
+    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: ensureSentenceEnding(relaxed) }
+  ];
 }
 
 function buildPhoneticVariant(text) {
@@ -473,7 +667,7 @@ function buildBalancedVariant(text, profile) {
       if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
         return '팀에 업데이트를 보내야 합니다.';
       }
-      return buildActionVariant(text);
+      return '팀에 업데이트를 보내야 합니다.';
     case 'question':
       return buildQuestionVariant(text);
     case 'apology':
@@ -491,6 +685,9 @@ function buildOrganizedVariant(text, profile) {
   const lower = normalizeWhitespace(text).toLowerCase();
   switch (profile.mlFocus?.label) {
     case 'action':
+      if (/(fix|수정|redirect|리다이렉트|리젝트).*(send|보내|update|업데이트).*(team|팀)/i.test(lower) || /(send|보내|update|업데이트).*(team|팀).*(fix|수정|redirect|리다이렉트|리젝트)/i.test(lower)) {
+        return '리다이렉트 문제를 수정하고 업데이트를 팀에 보내고 진행 상황까지 공유해야 합니다.';
+      }
       if (/(send|보내).*(update|업데이트).*(team|팀)/i.test(lower) || /(update|업데이트).*(team|팀)/i.test(lower)) {
         return '팀에 업데이트를 보내고 진행 상황까지 공유해야 합니다.';
       }
