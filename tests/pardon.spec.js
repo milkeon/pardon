@@ -176,7 +176,8 @@ test('Pardon은 녹음 → 정지 → STT → 변환 → 확정 흐름을 테스
   await expect(sttButton).toBeEnabled();
 
   await sttButton.click();
-  await expect(page.locator('#recorded-transcript')).toContainText('합치');
+  await expect(page.locator('#recorded-transcript')).toContainText('압치');
+  await expect(page.locator('#recovered-transcript')).toContainText('합치');
 
   await page.getByRole('button', { name: '변환' }).click();
   await expect(page.locator('#variant-list .variant-card')).toHaveCount(3);
@@ -219,8 +220,9 @@ test('Pardon은 녹음 STT가 무의미하면 실시간 원문을 기준으로 �
   await page.getByRole('button', { name: '정지' }).click();
   await page.getByRole('button', { name: 'STT', exact: true }).click();
 
-  await expect(page.locator('#recorded-transcript')).toContainText('검색바');
-  await expect(page.locator('#recorded-transcript')).not.toContainText('[냉냉]');
+  await expect(page.locator('#recorded-transcript')).toContainText('[냉냉]');
+  await expect(page.locator('#recovered-transcript')).toContainText('검색바');
+  await expect(page.locator('#recovered-transcript')).not.toContainText('[냉냉]');
   await expect(page.locator('#transcript-status')).toContainText('복구했습니다');
 
   expect(errors).toEqual([]);

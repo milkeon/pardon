@@ -15,6 +15,8 @@ test('index.html exposes the simplified Pardon controls', () => {
   assert.ok(html.includes('실시간 원문'));
   assert.ok(html.includes('원문 STT'));
   assert.ok(html.includes('녹음된 오디오'));
+  assert.ok(html.includes('녹음 STT 원문'));
+  assert.ok(html.includes('후보 생성에 사용된 기준 문장'));
   assert.ok(html.includes('STT</button>'));
   assert.ok(html.includes('후보 선택'));
   assert.ok(html.includes('원문을 기준으로 후보 3개를 고릅니다'));
@@ -37,7 +39,7 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=context-restore-31'));
+  assert.ok(html.includes('./src/app.js?v=context-restore-32'));
 });
 
 test('Pardon file STT path stays browser-local and does not require server-side OpenAI Whisper setup', () => {

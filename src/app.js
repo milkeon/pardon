@@ -1,8 +1,8 @@
-import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-29';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-29';
-import { mergeRecognitionResults } from './stt.js?v=llm-variants-29';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-29';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-29';
+import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-30';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-30';
+import { mergeRecognitionResults } from './stt.js?v=llm-variants-30';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-30';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-30';
 
 const testHooks = getTestHooks();
 
@@ -44,6 +44,8 @@ const els = {
   copyButton: document.querySelector('[data-action="copy"]'),
   transcriptStatus: document.querySelector('#transcript-status'),
   recordedTranscript: document.querySelector('#recorded-transcript'),
+  recordedTranscriptStatus: document.querySelector('#recorded-transcript-status'),
+  recoveredTranscript: document.querySelector('#recovered-transcript'),
   audioPlayback: document.querySelector('#audio-playback'),
   supportStatus: document.querySelector('#support-status'),
   variantList: document.querySelector('#variant-list'),
@@ -108,12 +110,27 @@ function initialize() {
 function renderRecordedTranscript() {
   if (!els.recordedTranscript) return;
 
-  const transcriptText = String(state.recoveredTranscript || state.rawTranscript || '');
-  const hasTranscript = Boolean(transcriptText);
-  els.recordedTranscript.classList.toggle('empty-state', !hasTranscript);
-  els.recordedTranscript.textContent = hasTranscript
-    ? transcriptText
-    : 'STT 버튼을 누르면 녹음 STT가 아래에 표시됩니다.';
+  const rawTranscriptText = String(state.recordedTranscriptRaw || state.rawTranscript || '');
+  const recoveredTranscriptText = String(state.recoveredTranscript || '');
+  const hasRawTranscript = Boolean(rawTranscriptText);
+  const hasRecoveredTranscript = Boolean(recoveredTranscriptText);
+  const comparisonSummary = normalizeWhitespace(state.transcriptComparison?.summary || '');
+
+  els.recordedTranscript.classList.toggle('empty-state', !hasRawTranscript);
+  els.recordedTranscript.textContent = hasRawTranscript
+    ? rawTranscriptText
+    : 'STT 버튼을 누르면 녹음 STT 원문이 아래에 표시됩니다.';
+
+  if (els.recordedTranscriptStatus) {
+    els.recordedTranscriptStatus.textContent = comparisonSummary || 'STT 버튼을 누르면 녹음 STT 원문과 비교 기준이 함께 표시됩니다.';
+  }
+
+  if (!els.recoveredTranscript) return;
+
+  els.recoveredTranscript.classList.toggle('empty-state', !hasRecoveredTranscript);
+  els.recoveredTranscript.textContent = hasRecoveredTranscript
+    ? recoveredTranscriptText
+    : '아직 비교 기준 문장이 없습니다.';
 }
 
 function wireEvents() {

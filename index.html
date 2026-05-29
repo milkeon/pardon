@@ -6,7 +6,7 @@
     <meta name="description" content="Pardon은 녹음 파일 STT를 버튼으로 실행하고, 원문 STT를 기준으로 녹음 STT를 교차검증해 후보 3개를 제안하는 정적 브라우저 앱입니다." />
     <title>Pardon</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./src/app.js?v=context-restore-31"></script>
+    <script type="module" src="./src/app.js?v=context-restore-32"></script>
   </head>
   <body>
     <main class="shell">
@@ -41,8 +41,18 @@
               <button class="button button--primary button--small" type="button" data-action="transcribe-recording" disabled>STT</button>
             </div>
             <div class="audio-transcript">
-              <span>녹음 STT 결과</span>
-              <pre id="recorded-transcript" class="audio-transcript__text empty-state">STT 버튼을 누르면 녹음 STT가 아래에 표시됩니다.</pre>
+              <div class="audio-transcript__header">
+                <span>녹음 STT 원문</span>
+                <small id="recorded-transcript-status" class="audio-transcript__status">STT 버튼을 누르면 녹음 STT 원문과 비교 기준이 함께 표시됩니다.</small>
+              </div>
+              <pre id="recorded-transcript" class="audio-transcript__text empty-state">STT 버튼을 누르면 녹음 STT 원문이 아래에 표시됩니다.</pre>
+            </div>
+            <div class="audio-transcript">
+              <div class="audio-transcript__header">
+                <span>후보 생성에 사용된 기준 문장</span>
+                <small class="audio-transcript__status">원문 STT와 녹음 STT를 비교한 뒤 실제 변환에 투입한 문장입니다.</small>
+              </div>
+              <pre id="recovered-transcript" class="audio-transcript__text empty-state">아직 비교 기준 문장이 없습니다.</pre>
             </div>
           </div>
           <div class="transcript-actions">

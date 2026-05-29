@@ -1173,7 +1173,7 @@ function buildDialogueVariant(text, profile = deriveContextProfile(text), struct
   const base = normalizeWhitespace(text);
   const cleaned = applyTranscriptCorrections(cleanSpokenKorean(base));
 
-  if (structure.clauses.length === 2) {
+  if (shouldPreserveFullContext(structure, cleaned)) {
     return ensureSentenceEnding(cleaned);
   }
 
@@ -1210,7 +1210,7 @@ function looksLikeConversation(text) {
 function buildSummaryVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {
   const cleaned = applyTranscriptCorrections(cleanSpokenKorean(text));
 
-  if (structure.clauses.length === 2) {
+  if (shouldPreserveFullContext(structure, cleaned)) {
     return ensureSentenceEnding(normalizeWhitespace(cleaned));
   }
 
@@ -1273,6 +1273,16 @@ function splitTranscriptClauses(text) {
     .split('|')
     .map((sentence) => sentence.trim())
     .filter(Boolean);
+}
+
+function shouldPreserveFullContext(structure, cleanedText) {
+  const cleaned = normalizeWhitespace(cleanedText);
+  if (!cleaned) return false;
+  if (structure.clauses.length <= 2) return cleaned.length <= 220;
+  if (structure.clauses.length <= 4 && cleaned.length <= 220 && structure.repeatedClauses === 0 && structure.fillerCount === 0) {
+    return true;
+  }
+  return false;
 }
 
 function analyzeTranscriptStructure(text, profile) {
