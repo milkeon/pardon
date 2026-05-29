@@ -267,17 +267,17 @@ async function callOpenAIRewriteVariants(baseTranscript, evidenceTranscript, hin
     return [
       {
         id: 'possibility-1',
-        label: '제안 1 · 보수적 교정',
+        label: '제안 1 · 문맥 교정(보수적)',
         text: guardRewriteVariant(cleanFallback, restoredCandidate, fallbackVariants[0]?.text || cleanFallback, 'strict')
       },
       {
         id: 'possibility-2',
-        label: '제안 2 · 문맥 복원',
+        label: '제안 2 · 문맥 교정(균형형)',
         text: restored
       },
       {
         id: 'possibility-3',
-        label: '제안 3 · 자연형 정리',
+        label: '제안 3 · 문맥 교정(과감형)',
         text: guardRewriteVariant(restored, polishedFallback[2]?.text || restored, restored, 'balanced')
       }
     ];

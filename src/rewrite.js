@@ -291,18 +291,18 @@ export function buildRewriteVariants(text) {
     return [
       {
         id: 'possibility-1',
-        label: '제안 1 · 오인식 보정',
-        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
+        label: '제안 1 · 문맥 교정(보수적)',
+        text: '녹음을 정지하면 보수적·균형형·과감형 문맥 교정 결과가 표시됩니다.'
       },
       {
         id: 'possibility-2',
-        label: '제안 2 · 문맥 교정',
-        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
+        label: '제안 2 · 문맥 교정(균형형)',
+        text: '녹음을 정지하면 보수적·균형형·과감형 문맥 교정 결과가 표시됩니다.'
       },
       {
         id: 'possibility-3',
-        label: '제안 3 · 매끄러운 문장',
-        text: '녹음을 정지하면 원문 보정, 자연스러운 문장, 정리된 문장이 표시됩니다.'
+        label: '제안 3 · 문맥 교정(과감형)',
+        text: '녹음을 정지하면 보수적·균형형·과감형 문맥 교정 결과가 표시됩니다.'
       }
     ];
   }
@@ -356,9 +356,9 @@ function buildUiExplanationRewriteVariants(text) {
   );
 
   return [
-    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: corrected },
-    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: contextual },
-    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: polished }
+    { id: 'possibility-1', label: '제안 1 · 문맥 교정(보수적)', text: corrected },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정(균형형)', text: contextual },
+    { id: 'possibility-3', label: '제안 3 · 문맥 교정(과감형)', text: polished }
   ];
 }
 
@@ -376,9 +376,9 @@ function buildTechnicalExplanationRewriteVariants(text) {
   const relaxed = buildTechnicalExplanationRelaxedVariant(source, corrected);
 
   return [
-    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: corrected },
-    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: balanced },
-    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: relaxed }
+    { id: 'possibility-1', label: '제안 1 · 문맥 교정(보수적)', text: corrected },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정(균형형)', text: balanced },
+    { id: 'possibility-3', label: '제안 3 · 문맥 교정(과감형)', text: relaxed }
   ];
 }
 
@@ -841,19 +841,19 @@ function selectRewriteVariants(sourceText, profile, candidates) {
   const bands = [
     {
       id: 'possibility-1',
-      label: '제안 1 · 오인식 보정',
+      label: '제안 1 · 문맥 교정(보수적)',
       mode: 'strict',
       kinds: new Set(['action', 'correction', 'phonetic', 'contextual'])
     },
     {
       id: 'possibility-2',
-      label: '제안 2 · 문맥 교정',
+      label: '제안 2 · 문맥 교정(균형형)',
       mode: 'balanced',
       kinds: new Set(['balanced', 'contextual', 'dialogue', 'combined'])
     },
     {
       id: 'possibility-3',
-      label: '제안 3 · 매끄러운 문장',
+      label: '제안 3 · 문맥 교정(과감형)',
       mode: 'relaxed',
       kinds: new Set(['organized', 'summary', 'combined', 'dialogue'])
     }
@@ -1053,9 +1053,9 @@ function buildActionRewriteVariants(text, profile) {
   }
 
   return [
-    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: ensureSentenceEnding(strict) },
-    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: ensureSentenceEnding(balanced) },
-    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: ensureSentenceEnding(relaxed) }
+    { id: 'possibility-1', label: '제안 1 · 문맥 교정(보수적)', text: ensureSentenceEnding(strict) },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정(균형형)', text: ensureSentenceEnding(balanced) },
+    { id: 'possibility-3', label: '제안 3 · 문맥 교정(과감형)', text: ensureSentenceEnding(relaxed) }
   ];
 }
 

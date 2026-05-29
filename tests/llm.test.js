@@ -83,9 +83,9 @@ test('fetchRewriteVariants는 원문(base)과 녹음(evidence)을 함께 /api/an
       ok: true,
       async json() {
         return {
-          p1: { label: '제안 1 · 보수적 교정', text: '원문 보정 결과' },
-          p2: { label: '제안 2 · 균형형 교정', text: '균형형 결과' },
-          p3: { label: '제안 3 · 자연형 교정', text: '자연형 결과' }
+          p1: { label: '제안 1 · 문맥 교정(보수적)', text: '원문 보정 결과' },
+          p2: { label: '제안 2 · 문맥 교정(균형형)', text: '균형형 결과' },
+          p3: { label: '제안 3 · 문맥 교정(과감형)', text: '과감형 결과' }
         };
       }
     };
@@ -107,7 +107,7 @@ test('fetchRewriteVariants는 원문(base)과 녹음(evidence)을 함께 /api/an
       assert.equal(variants.length, 3);
       assert.equal(variants[0].text, '원문 보정 결과');
       assert.equal(variants[1].text, '균형형 결과');
-      assert.equal(variants[2].text, '자연형 결과');
+      assert.equal(variants[2].text, '과감형 결과');
     });
   } finally {
     globalThis.fetch = originalFetch;

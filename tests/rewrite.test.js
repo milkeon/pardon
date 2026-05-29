@@ -54,7 +54,7 @@ test('buildRewriteVariants는 제안 1, 제안 2, 제안 3을 반환한다', () 
   );
   assert.deepEqual(
     variants.map((variant) => variant.label),
-    ['제안 1 · 오인식 보정', '제안 2 · 문맥 교정', '제안 3 · 매끄러운 문장']
+    ['제안 1 · 문맥 교정(보수적)', '제안 2 · 문맥 교정(균형형)', '제안 3 · 문맥 교정(과감형)']
   );
   assert.ok(variants[0].text.includes('제가 해야 합니다') || variants[0].text.includes('팀'));
   assert.ok(variants[2].text.length > 0);

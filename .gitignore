@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 coverage/
+test-results/
 
 # 환경변수
 .env
