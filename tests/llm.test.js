@@ -72,3 +72,44 @@ test('fetchConfirmationSummary는 file: 환경에서 /api/summary 대신 로컬 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test('fetchRewriteVariants는 원문(base)과 녹음(evidence)을 함께 /api/analyze로 전송한다', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (_url, options = {}) => {
+    requestBody = JSON.parse(String(options.body || '{}'));
+    return {
+      ok: true,
+      async json() {
+        return {
+          p1: { label: '제안 1 · 보수적 교정', text: '원문 보정 결과' },
+          p2: { label: '제안 2 · 균형형 교정', text: '균형형 결과' },
+          p3: { label: '제안 3 · 자연형 교정', text: '자연형 결과' }
+        };
+      }
+    };
+  };
+
+  try {
+    await withMockedLocation({ hostname: 'localhost', protocol: 'http:' }, async () => {
+      const variants = await fetchRewriteVariants({
+        baseTranscript: '원문 STT입니다',
+        evidenceTranscript: '녹음 STT 입니다',
+        hint: '명확함, 자연스러움'
+      });
+
+      assert.deepEqual(requestBody, {
+        baseTranscript: '원문 STT입니다',
+        evidenceTranscript: '녹음 STT 입니다',
+        hint: '명확함, 자연스러움'
+      });
+      assert.equal(variants.length, 3);
+      assert.equal(variants[0].text, '원문 보정 결과');
+      assert.equal(variants[1].text, '균형형 결과');
+      assert.equal(variants[2].text, '자연형 결과');
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

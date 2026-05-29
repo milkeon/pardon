@@ -1,7 +1,8 @@
-import { buildRewriteVariants, buildTranscriptDiff, normalizeWhitespace, renderTranscriptDiff } from './rewrite.js?v=stt-diff-26';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=stt-diff-26';
-import { mergeRecognitionResults } from './stt.js?v=stt-diff-26';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=stt-diff-26';
+import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=llm-variants-27';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-27';
+import { mergeRecognitionResults } from './stt.js?v=llm-variants-27';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-27';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-27';
 
 const testHooks = getTestHooks();
 
@@ -9,12 +10,12 @@ function getTestHooks() {
   return typeof window !== 'undefined' ? window.__PARDON_TEST_HOOKS__ || null : null;
 }
 
-async function fetchRewriteVariants(transcript) {
+async function fetchRewriteVariants(request) {
   if (typeof testHooks?.fetchRewriteVariants === 'function') {
-    return testHooks.fetchRewriteVariants(transcript);
+    return testHooks.fetchRewriteVariants(request);
   }
 
-  return fetchRewriteVariantsImpl(transcript);
+  return fetchRewriteVariantsImpl(request);
 }
 
 async function fetchConfirmationSummary(selectedText, transcript) {
@@ -72,8 +73,8 @@ const state = {
   recognitionSegments: [],
   recognitionCommittedTranscript: '',
   liveTranscriptBackup: '',
-  diffModel: null,
-  diffSelections: {},
+  variantOptions: [],
+  selectedVariantId: '',
   selectedAudioUrl: '',
   confirmedSummary: '',
   readyForVariants: false,
@@ -194,7 +195,7 @@ function stopCapture() {
   state.diffSelections = {};
   state.isTranscribing = false;
   state.recordedAudioBlob = null;
-  renderVariantPlaceholder('정지하면 변환 버튼으로 원문 STT와 녹음 STT의 차이를 고를 수 있습니다.');
+  renderVariantPlaceholder('정지하면 변환 버튼으로 원문 기반 LLM 후보 3개를 만들 수 있습니다.');
   renderRecordedTranscript();
   renderSelectedDiffSummary();
   setRecording(false);
@@ -210,7 +211,7 @@ function clearAll() {
   setTranscript('');
   setAudioUrl('');
   renderRecordedTranscript();
-  renderVariantPlaceholder('STT 버튼을 누른 뒤 변환하면 원문 STT와 녹음 STT의 차이를 선택할 수 있습니다.');
+  renderVariantPlaceholder('STT 버튼을 누른 뒤 변환하면 원문 기반 LLM 후보 3개를 만들 수 있습니다.');
   setStatus('원문, 오디오, 선택 상태를 초기화했습니다.');
 }
 
@@ -300,9 +301,9 @@ async function handleTranscribeClicked() {
     state.readyForVariants = Boolean(normalizeWhitespace(state.rawTranscript) && normalizeWhitespace(state.cleanedTranscript));
 
     renderRecordedTranscript();
-    renderVariantPlaceholder(state.readyForVariants ? '변환 버튼을 누르면 원문 STT와 녹음 STT의 차이를 선택할 수 있습니다.' : '녹음 파일 STT 결과가 비어 있습니다. 다시 시도해 주세요.');
+    renderVariantPlaceholder(state.readyForVariants ? '변환 버튼을 누르면 원문 기반 LLM 후보 3개를 생성합니다.' : '녹음 파일 STT 결과가 비어 있습니다. 다시 시도해 주세요.');
     renderSelectedDiffSummary();
-    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 이제 변환 버튼으로 차이만 고를 수 있습니다.' : '녹음 파일 STT 결과가 비어 있습니다.');
+    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 이제 변환 버튼으로 원문 기반 후보 3개를 만들 수 있습니다.' : '녹음 파일 STT 결과가 비어 있습니다.');
   } catch (error) {
     state.rawTranscript = '';
     state.cleanedTranscript = '';
@@ -342,7 +343,7 @@ function onRecognitionResult(event) {
   state.pendingLineBreakBeforeNextSpeech = false;
 
   if (!state.isTranscribing) {
-    setStatus('녹음 중입니다. 정지하면 실시간 원문과 녹음 파일 STT를 비교합니다.');
+    setStatus('녹음 중입니다. 정지 후 파일 STT를 만들고, 변환 시 원문 기반 후보 3개를 생성합니다.');
   }
 }
 
@@ -372,7 +373,7 @@ function onTranscriptEdit() {
   state.diffSelections = {};
   state.confirmedSummary = '';
   if (state.readyForVariants) {
-    renderVariantPlaceholder('원문이 바뀌었습니다. 변환 버튼을 다시 눌러 주세요.');
+    renderVariantPlaceholder('원문이 바뀌었습니다. 후보 3개를 다시 생성하려면 변환 버튼을 다시 눌러 주세요.');
     renderConfirmedSummary('확정하면 아래에 요약이 표시됩니다.', '');
   }
   renderSelectedDiffSummary();
@@ -380,65 +381,50 @@ function onTranscriptEdit() {
 
 function renderVariants() {
   if (!state.readyForVariants) {
-    renderVariantPlaceholder('STT가 끝나면 변환 버튼으로 원문 STT와 녹음 STT를 비교할 수 있습니다.');
+    renderVariantPlaceholder('STT가 끝나면 변환 버튼으로 원문 기반 LLM 후보 3개를 만들 수 있습니다.');
     return;
   }
 
-  if (!state.diffModel) {
-    renderVariantPlaceholder('변환 버튼을 누르면 원문 STT와 녹음 STT의 차이를 보여줍니다.');
+  if (!state.variantOptions.length) {
+    renderVariantPlaceholder('변환 버튼을 누르면 원문 기반 LLM 후보 3개를 보여줍니다.');
     return;
   }
 
-  if (!state.diffModel.changeCount) {
-    renderVariantPlaceholder('두 STT가 거의 같아서 바로 결과를 복사할 수 있습니다.');
-    renderSelectedDiffSummary();
-    return;
-  }
-
-  renderVariantCards(state.diffModel.segments.filter((segment) => segment.kind === 'change'));
+  renderVariantCards(state.variantOptions);
 }
 
-function renderVariantCards(segments) {
+function renderVariantCards(variants) {
   els.variantList.innerHTML = '';
   els.emptyState.hidden = true;
 
-  const diffSegments = Array.isArray(segments) ? segments : [];
-  if (!diffSegments.length) {
-    renderVariantPlaceholder('차이가 있는 부분이 없습니다.');
+  const variantOptions = Array.isArray(variants) ? variants : [];
+  if (!variantOptions.length) {
+    renderVariantPlaceholder('제안 후보가 아직 없습니다.');
     renderSelectedDiffSummary();
     return;
   }
 
-  diffSegments.forEach((segment, index) => {
-    const choice = state.diffSelections[segment.id] || state.diffModel?.preferredSource || 'right';
+  const sourceText = getRewriteSourceText();
+
+  variantOptions.forEach((variant, index) => {
+    const isSelected = state.selectedVariantId === variant.id;
+    const comparison = buildVariantComparison(sourceText, variant.text);
     const card = document.createElement('article');
-    card.className = `variant-card${choice ? ' is-selected' : ''}`;
-    card.dataset.diffId = segment.id;
-    card.dataset.selectedSource = choice;
+    card.className = `variant-card${isSelected ? ' is-selected' : ''}`;
+    card.dataset.variantId = variant.id;
     card.innerHTML = `
       <div class="variant-card__body">
-        <span class="variant-card__label">차이 ${index + 1}</span>
-        <span class="variant-card__meta">원문 ${segment.leftTokens.length || 0}개 · 녹음 ${segment.rightTokens.length || 0}개</span>
-        <div class="diff-compare" role="group" aria-label="차이 ${index + 1} 선택">
-          <button type="button" class="diff-compare__side ${choice === 'left' ? 'is-selected' : ''}" data-action="choose-left" aria-pressed="${choice === 'left'}">
-            <span class="diff-compare__label">원문 STT</span>
-            <span class="diff-compare__text">${escapeHtml(segment.leftText || '비어 있음')}</span>
-          </button>
-          <button type="button" class="diff-compare__side ${choice === 'right' ? 'is-selected' : ''}" data-action="choose-right" aria-pressed="${choice === 'right'}">
-            <span class="diff-compare__label">녹음 STT</span>
-            <span class="diff-compare__text">${escapeHtml(segment.rightText || '비어 있음')}</span>
-          </button>
-        </div>
-        <span class="variant-card__diff">카드를 직접 눌러 선택하세요. 선택된 쪽이 네온으로 표시됩니다.</span>
+        <button type="button" class="variant-choice ${isSelected ? 'is-selected' : ''}" data-action="choose-variant" aria-pressed="${isSelected}">
+          <span class="variant-card__label">${escapeHtml(variant.label || `제안 ${index + 1}`)}</span>
+          <span class="variant-card__meta">변경 토큰 ${comparison.changedCount}개</span>
+          <span class="variant-card__text">${comparison.html}</span>
+          <span class="variant-card__diff">${escapeHtml(comparison.summary)} 카드 전체를 눌러 선택하세요.</span>
+        </button>
       </div>
     `;
 
-    card.querySelector('[data-action="choose-left"]')?.addEventListener('click', () => {
-      setDiffChoice(segment.id, 'left');
-    });
-
-    card.querySelector('[data-action="choose-right"]')?.addEventListener('click', () => {
-      setDiffChoice(segment.id, 'right');
+    card.querySelector('[data-action="choose-variant"]')?.addEventListener('click', () => {
+      setSelectedVariant(variant.id);
     });
 
     els.variantList.appendChild(card);
@@ -519,26 +505,42 @@ function markChangedTokens(sourceTokens, variantTokens) {
   return marked;
 }
 
-function handleGenerateClicked() {
+async function handleGenerateClicked() {
   state.readyForVariants = true;
   const liveTranscript = normalizeWhitespace(state.transcript || state.liveTranscriptRaw);
   const recordedTranscript = normalizeWhitespace(state.rawTranscript);
 
   if (!liveTranscript || !recordedTranscript) {
-    state.diffModel = null;
-    state.diffSelections = {};
+    state.variantOptions = [];
+    state.selectedVariantId = '';
     renderVariantPlaceholder('먼저 원문 STT와 녹음 STT가 둘 다 있어야 변환할 수 있습니다.');
-    setStatus('원문 STT와 녹음 STT가 모두 준비되면 차이 선택을 시작할 수 있습니다.');
+    setStatus('원문 STT와 녹음 STT가 모두 준비되면 후보 3개를 생성할 수 있습니다.');
     renderSelectedDiffSummary();
     return;
   }
 
-  state.diffModel = buildTranscriptDiff(liveTranscript, recordedTranscript, `${liveTranscript} ${recordedTranscript}`);
-  state.diffSelections = { ...state.diffModel.selection };
-  renderVariants();
-  setStatus(state.diffModel.changeCount > 0
-    ? `차이 ${state.diffModel.changeCount}곳을 찾았습니다. 각 카드에서 원문 또는 녹음을 골라 주세요.`
-    : '두 STT가 거의 같아서 바로 결과를 복사할 수 있습니다.');
+  setActionControlsDisabled(true);
+  renderVariantPlaceholder('원문을 기준으로 녹음 STT를 교차검증해 후보 3개를 생성하는 중입니다.');
+  setStatus('LLM이 원문 기반 후보 3개를 생성하는 중입니다.');
+
+  try {
+    const variants = await fetchRewriteVariants({
+      baseTranscript: liveTranscript,
+      evidenceTranscript: recordedTranscript
+    });
+    const safeVariants = Array.isArray(variants) && variants.length ? variants : buildRewriteVariants(liveTranscript);
+    state.variantOptions = safeVariants;
+    state.selectedVariantId = safeVariants[0]?.id || '';
+    renderVariants();
+    setStatus(`원문 기반 후보 ${safeVariants.length}개를 만들었습니다. 원하는 카드를 고르세요.`);
+  } catch (error) {
+    state.variantOptions = buildRewriteVariants(liveTranscript);
+    state.selectedVariantId = state.variantOptions[0]?.id || '';
+    renderVariants();
+    setStatus(`LLM 후보 생성에 실패해 로컬 후보로 전환했습니다: ${friendlyError(error)}`);
+  } finally {
+    setActionControlsDisabled(false);
+  }
 }
 
 function createSpeechRecognition() {
@@ -652,31 +654,26 @@ function getCommonPrefixLength(left, right) {
   return index;
 }
 
-function setDiffChoice(segmentId, choice) {
-  if (!state.diffModel) {
+function setSelectedVariant(variantId) {
+  if (!variantId) {
     return;
   }
 
-  state.diffSelections = {
-    ...state.diffSelections,
-    [segmentId]: choice
-  };
-  renderVariantCards(state.diffModel.segments.filter((segment) => segment.kind === 'change'));
+  state.selectedVariantId = variantId;
+  renderVariantCards(state.variantOptions);
 }
 
 function getSelectedDiffText() {
-  if (!state.diffModel) {
+  if (!state.variantOptions.length) {
     return '';
   }
 
-  return renderTranscriptDiff(state.diffModel.segments, state.diffSelections);
+  return normalizeWhitespace(state.variantOptions.find((variant) => variant.id === state.selectedVariantId)?.text || state.variantOptions[0]?.text || '');
 }
 
 function renderSelectedDiffSummary() {
   const mergedText = getSelectedDiffText();
-  const sourceLabel = state.diffModel
-    ? (state.diffModel.changeCount ? '선택 결과' : '동일한 결과')
-    : '';
+  const sourceLabel = state.variantOptions.find((variant) => variant.id === state.selectedVariantId)?.label || '';
   renderConfirmedSummary(mergedText || '확정하면 아래에 요약이 표시됩니다.', sourceLabel);
 }
 
@@ -691,7 +688,7 @@ function renderVariantPlaceholder(message) {
 function copySelectedVariant() {
   const text = getSelectedDiffText();
   if (!text) {
-    setStatus('먼저 원문 STT와 녹음 STT를 비교해야 복사할 수 있습니다.');
+    setStatus('먼저 원문과 녹음 STT로 후보 3개를 생성해야 복사할 수 있습니다.');
     return;
   }
 
@@ -722,10 +719,10 @@ function renderConfirmedSummary(summaryText, sourceLabel) {
 
 function setActionControlsDisabled(isBusy) {
   const hasTranscript = Boolean(normalizeWhitespace(state.rawTranscript) && normalizeWhitespace(state.cleanedTranscript));
-  const hasDiff = Boolean(state.diffModel && state.diffModel.changeCount > 0);
+  const hasSelection = Boolean(normalizeWhitespace(getSelectedDiffText()));
   const busy = Boolean(isBusy || state.isTranscribing);
   els.generateButton.disabled = busy || !hasTranscript;
-  els.copyButton.disabled = busy || (!hasDiff && !normalizeWhitespace(getSelectedDiffText()));
+  els.copyButton.disabled = busy || !hasSelection;
   updateTranscribeButtonState();
 }
 

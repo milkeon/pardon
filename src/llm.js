@@ -2,17 +2,35 @@ import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, n
 
 const REQUEST_TIMEOUT_MS = 12_000;
 
-export async function fetchRewriteVariants(transcript) {
+export async function fetchRewriteVariants(input) {
+  const request = normalizeRewriteRequest(input);
   if (shouldUseStaticFallback()) {
-    return buildRewriteVariants(transcript);
+    return buildRewriteVariants(request.baseTranscript || request.evidenceTranscript);
   }
 
   const payload = await postJson('/api/analyze', {
-    transcript,
-    hint: deriveContextProfile(transcript).hints.join(', ')
+    baseTranscript: request.baseTranscript,
+    evidenceTranscript: request.evidenceTranscript,
+    hint: request.hint || deriveContextProfile(request.baseTranscript || request.evidenceTranscript).hints.join(', ')
   });
 
   return normalizeRewritePayload(payload);
+}
+
+function normalizeRewriteRequest(input) {
+  if (typeof input === 'string') {
+    return {
+      baseTranscript: normalizeWhitespace(input),
+      evidenceTranscript: '',
+      hint: ''
+    };
+  }
+
+  return {
+    baseTranscript: normalizeWhitespace(input?.baseTranscript),
+    evidenceTranscript: normalizeWhitespace(input?.evidenceTranscript),
+    hint: normalizeWhitespace(input?.hint)
+  };
 }
 
 export async function fetchConfirmationSummary(selectedText, transcript) {
@@ -34,7 +52,8 @@ export async function fetchConfirmationSummary(selectedText, transcript) {
 
 async function postJson(url, body) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timeoutId = controller ? window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+  const timeoutHost = typeof window !== 'undefined' ? window : globalThis;
+  const timeoutId = controller ? timeoutHost.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
 
   try {
     const response = await fetch(url, {
@@ -51,7 +70,7 @@ async function postJson(url, body) {
   } catch {
     return null;
   } finally {
-    if (timeoutId) window.clearTimeout(timeoutId);
+    if (timeoutId) timeoutHost.clearTimeout(timeoutId);
   }
 }
 

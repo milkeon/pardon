@@ -237,8 +237,10 @@ async function getPreferredChatProvider() {
 }
 
 // OpenAI 호환 Chat Completion API 또는 로컬 LLM 서버를 호출해 3가지 제안을 빌드하는 헬퍼
-async function callOpenAIRewriteVariants(transcript, hint) {
-  const cleanFallback = normalizeWhitespace(transcript);
+async function callOpenAIRewriteVariants(baseTranscript, evidenceTranscript, hint) {
+  const cleanBase = normalizeWhitespace(baseTranscript);
+  const cleanEvidence = normalizeWhitespace(evidenceTranscript);
+  const cleanFallback = cleanBase || cleanEvidence;
   const provider = await getPreferredChatProvider();
   if (!provider) {
     return buildRewriteVariants(cleanFallback);
@@ -249,27 +251,29 @@ async function callOpenAIRewriteVariants(transcript, hint) {
 [중요 주제/용어 힌트 적용]: "${hint}"
 위 힌트 주제와 부합하는 기술 용어와 문맥을 살려 복원하십시오.`
     : '';
-  const systemContent = `화자는 한국어와 영어를 수시로 혼용하는 IT 엔지니어/개발자입니다.
-브라우저 무료 STT의 한계로 인해, 전문 기술 영단어들이 무차별적으로 억지스러운 한국어 발음이나 띄어쓰기 오류로 깨져서 오인식되었을 수 있습니다.
+  const evidenceBlock = cleanEvidence
+    ? `
+보조 증거 STT(evidence)는 동일 발화의 재전사 결과입니다. evidence가 base보다 명백히 정확할 때만 반영하십시오.`
+    : '';
+  const systemContent = `당신은 한국어 STT 교정 보조기입니다.
+화자는 한국어와 영어를 섞어 말할 수 있고, 기술 용어/고유명사/숫자/명령어가 포함될 수 있습니다.
 
-1단계는 STT 오인식 단어를 문맥에 맞는 실제 의도어로 교정하는 것입니다.
-불확실한 단어는 추측하지 말고 원문을 유지하십시오. 문맥 밖 명사나 과한 설명을 새로 만들지 마십시오.
-예를 들어 "리사이젝트"처럼 발음이 깨진 단어는 "리다이렉트" 같은 실제 용어로 복원할 수 있지만, 확실하지 않으면 그대로 두십시오.
-2단계에서만 문장을 더 자연스럽게 정리하십시오. 의미를 새로 만들거나 요약하지 말고, 원문의 뜻과 순서를 최대한 유지하십시오.
+핵심 규칙:
+1. baseTranscript를 기준 원문으로 사용하십시오.
+2. evidenceTranscript는 교차검증 증거로만 사용하십시오.${evidenceBlock}
+3. evidenceTranscript가 더 명확한 경우에만 base를 수정하십시오.
+4. 확신이 낮으면 base를 유지하십시오.
+5. 원문에 없는 새 의미를 추가하지 마십시오.
+6. 요약, 과도한 의역, 설명 추가를 하지 마십시오.
+7. 숫자, 시간, 날짜, 파일명, 명령어, 고유명사, 영문 기술 용어는 더 확실한 쪽을 우선하되 확신이 낮으면 base를 유지하십시오.
 
-중요:
-- v1은 가장 원문에 가까운 오인식 보정본이어야 합니다.
-- v2는 문맥을 살리되 원문 의미를 유지한 균형본이어야 합니다.
-- v3는 읽기 편하게 정리할 수 있지만, 원문과 무관한 내용을 만들면 안 됩니다.
+출력 규칙:
+- v1: 가장 보수적인 교정본. 원문을 최대한 유지하고 명백한 STT 오류만 바로잡으십시오.
+- v2: 균형형 교정본. 원문 의미와 순서를 유지하면서 evidence가 강하게 뒷받침하는 수정만 반영하십시오.
+- v3: 자연형 교정본. 의미는 유지하되 읽기만 조금 더 자연스럽게 정리하십시오.
 - 세 결과는 서로 거의 같은 문장 3개가 아니라, 보정 깊이가 다른 3개여야 합니다.${hintBlock}
 
-반환 양식은 아래의 3가지 대안을 지닌 엄격한 JSON 형태입니다. (키: v1, v2, v3)
-
-- v1: 오인식된 단어를 먼저 교정한 보정본
-- v2: 문맥을 살려 더 자연스럽고 읽기 편하게 다시 쓴 문장
-- v3: 핵심 의미까지 정리한 가장 매끄러운 최종본
-
-설명은 절대로 덧붙이지 말고 오직 JSON(v1, v2, v3)만 리턴하십시오.`;
+반환 형식은 오직 엄격한 JSON 객체 {"v1":"...","v2":"...","v3":"..."} 입니다.`;
   try {
     const content = await callChatCompletions({
       baseUrl: provider.baseUrl,
@@ -279,7 +283,7 @@ async function callOpenAIRewriteVariants(transcript, hint) {
       responseFormat: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemContent },
-        { role: 'user', content: JSON.stringify({ transcript }) }
+        { role: 'user', content: JSON.stringify({ baseTranscript: cleanBase, evidenceTranscript: cleanEvidence, hint }) }
       ]
     });
 
@@ -288,17 +292,17 @@ async function callOpenAIRewriteVariants(transcript, hint) {
     return [
       {
         id: 'possibility-1',
-        label: '제안 1 · 오인식 보정',
+        label: '제안 1 · 보수적 교정',
         text: guardRewriteVariant(cleanFallback, parsed?.v1, fallbackVariants[0]?.text || cleanFallback, 'strict')
       },
       {
         id: 'possibility-2',
-        label: '제안 2 · 문맥 교정',
+        label: '제안 2 · 균형형 교정',
         text: guardRewriteVariant(cleanFallback, parsed?.v2, fallbackVariants[1]?.text || cleanFallback, 'balanced')
       },
       {
         id: 'possibility-3',
-        label: '제안 3 · 매끄러운 문장',
+        label: '제안 3 · 자연형 교정',
         text: guardRewriteVariant(cleanFallback, parsed?.v3, fallbackVariants[2]?.text || cleanFallback, 'relaxed')
       }
     ];
@@ -385,8 +389,8 @@ const server = http.createServer(async (req, res) => {
       req.on('end', async () => {
         try {
           const body = Buffer.concat(chunks).toString('utf8');
-          const { transcript, hint } = JSON.parse(body);
-          const variants = await callOpenAIRewriteVariants(transcript, hint);
+          const { baseTranscript, evidenceTranscript, hint } = JSON.parse(body);
+          const variants = await callOpenAIRewriteVariants(baseTranscript, evidenceTranscript, hint);
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify(variants));
         } catch (err) {

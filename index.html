@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Pardon은 녹음 파일 STT를 버튼으로 실행하고, 원문 STT와 정리본을 비교해 클릭으로 선택하는 정적 브라우저 앱입니다." />
+    <meta name="description" content="Pardon은 녹음 파일 STT를 버튼으로 실행하고, 원문 STT를 기준으로 녹음 STT를 교차검증해 후보 3개를 제안하는 정적 브라우저 앱입니다." />
     <title>Pardon</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script type="module" src="./src/app.js?v=stt-diff-26"></script>
+    <script type="module" src="./src/app.js?v=llm-variants-27"></script>
   </head>
   <body>
     <main class="shell">
@@ -52,18 +52,18 @@
 
         <article class="panel">
           <div class="panel__header">
-            <h2>차이 선택</h2>
+            <h2>후보 선택</h2>
           </div>
           <div class="variant-guide">
-            <p class="variant-guide__title">git diff처럼 고르기</p>
+            <p class="variant-guide__title">원문을 기준으로 후보 3개를 고릅니다</p>
             <ul class="variant-guide__list">
-              <li><strong>원문 STT</strong>와 <strong>녹음 STT</strong>의 다른 부분만 카드로 보여줍니다.</li>
-              <li>각 카드에서 둘 중 더 맞는 쪽을 선택하면 아래 결과가 바로 바뀝니다.</li>
-              <li>바뀌지 않은 부분은 그대로 유지됩니다.</li>
+              <li><strong>원문 STT</strong>를 기준으로 <strong>녹음 STT</strong>를 증거로 삼아 LLM 후보 3개를 만듭니다.</li>
+              <li>카드마다 원문에서 바뀐 토큰을 강조해 보여줍니다.</li>
+              <li>가장 맞는 카드 하나를 고르면 아래 결과가 바로 바뀝니다.</li>
             </ul>
           </div>
           <div id="variants-empty" class="empty-state" hidden>
-            STT 버튼을 누른 뒤 변환하면 차이만 선택할 수 있습니다.
+            STT 버튼을 누른 뒤 변환하면 후보 3개를 선택할 수 있습니다.
           </div>
           <div id="variant-list" class="variant-list" aria-live="polite"></div>
           <section class="confirmation-panel">
