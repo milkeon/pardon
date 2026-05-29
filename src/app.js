@@ -1,8 +1,8 @@
-import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-30';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-30';
-import { mergeRecognitionResults } from './stt.js?v=llm-variants-30';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-30';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-30';
+import { buildRewriteVariants, buildTranscriptRecovery, normalizeWhitespace } from './rewrite.js?v=context-restore-33';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=context-restore-33';
+import { mergeRecognitionResults } from './stt.js?v=context-restore-33';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=context-restore-33';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=context-restore-33';
 
 const testHooks = getTestHooks();
 
@@ -310,7 +310,7 @@ async function handleTranscribeClicked() {
       }
     });
     const normalizedRaw = String(rawTranscript || '');
-    const transcriptComparison = compareTranscriptSources(
+    const transcriptComparison = buildTranscriptRecovery(
       state.liveTranscriptRaw,
       normalizedRaw,
       state.transcript || state.liveTranscriptRaw || normalizedRaw

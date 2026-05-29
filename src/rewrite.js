@@ -325,14 +325,19 @@ export function buildRewriteVariants(text) {
 
 function looksLikeUiExplanation(text) {
   const source = normalizeWhitespace(text).toLowerCase();
-  return /(ui|검색|검색바|목록|리스트|표기|필터|버튼|화면)/i.test(source)
-    && /(추가|보면|하잖아요|되겠지|여기서|어디서)/i.test(source);
+  return /(ui|검색|검색바|목록|리스트|표기|필터|버튼|화면|카드|후보|결과)/i.test(source)
+    && /(추가|보면|하잖아요|되겠지|여기서|어디서|고르면|선택|바뀝|보여)/i.test(source);
 }
 
 function buildUiExplanationRewriteVariants(text) {
   const source = normalizeWhitespace(text);
   const corrected = ensureSentenceEnding(
     source
+      .replace(/후보\s*선택원을/g, '후보 선택을')
+      .replace(/후보\s*세계를/g, '후보 3개를')
+      .replace(/보여\s*줍니다가장/g, '보여 줍니다. 가장')
+      .replace(/가장\s*맞는\s*카드\s*하나를\s*고르면\s*아래\s*결과가\s*바로\s*바힙니다/g, '가장 맞는 카드 하나를 고르면 아래 결과가 바로 바뀝니다')
+      .replace(/바힙니다/g, '바뀝니다')
       .replace(/요런\s*ui/gi, '이런 UI')
       .replace(/검색바다/g, '검색바가')
       .replace(/표기에가/g, '표기에서')
@@ -535,11 +540,13 @@ export function compareTranscriptSources(liveText, recordedText, contextText = '
   const profile = deriveContextProfile(context || live || recorded);
   const liveScore = scoreTranscriptRecoveryCandidate(liveRaw, recordedRaw, context, profile);
   const recordedScore = scoreTranscriptRecoveryCandidate(recordedRaw, liveRaw, context, profile);
-  const chosenSource = recordedScore >= liveScore ? 'recorded' : 'live';
+  const chosenSource = recordedScore > liveScore ? 'recorded' : 'live';
   const recoveredText = (chosenSource === 'recorded' ? recordedRaw : liveRaw).trim();
-  const summary = chosenSource === 'recorded'
-    ? '녹음 파일 STT가 더 자연스러워서 이를 기준으로 복구했습니다.'
-    : '실시간 받아쓰기가 더 자연스러워서 이를 기준으로 복구했습니다.';
+  const summary = live === recorded
+    ? '두 STT가 거의 같아서 원문 형태를 유지한 채 복구했습니다.'
+    : chosenSource === 'recorded'
+      ? '녹음 파일 STT가 더 자연스러워서 이를 기준으로 복구했습니다.'
+      : '실시간 받아쓰기가 더 자연스러워서 이를 기준으로 복구했습니다.';
 
   return {
     liveText: liveRaw.trim(),
@@ -550,6 +557,23 @@ export function compareTranscriptSources(liveText, recordedText, contextText = '
     recordedScore,
     summary
   };
+}
+
+export function buildTranscriptRecovery(liveText, recordedText, contextText = '') {
+  const comparison = compareTranscriptSources(liveText, recordedText, contextText);
+  const recoveredSource = normalizeWhitespace(comparison.recoveredText || comparison.liveText || comparison.recordedText);
+  const repaired = normalizeWhitespace(buildRewriteVariants(recoveredSource)[0]?.text || recoveredSource);
+
+  return {
+    ...comparison,
+    recoveredText: repaired || recoveredSource
+  };
+}
+
+export function buildRewriteVariantsFromTranscripts(baseTranscript, evidenceTranscript = '', contextText = '') {
+  const comparison = buildTranscriptRecovery(baseTranscript, evidenceTranscript, contextText || `${baseTranscript || ''} ${evidenceTranscript || ''}`);
+  const source = normalizeWhitespace(comparison.recoveredText || comparison.liveText || comparison.recordedText);
+  return buildRewriteVariants(source);
 }
 
 export function buildTranscriptDiff(leftText, rightText, contextText = '') {
@@ -1491,6 +1515,7 @@ function applyTranscriptCorrections(text) {
     .replace(/상황으로 인지하고/g, '상황을 인지하고')
     .replace(/데이터가 부족해 가지고/g, '데이터가 부족해서')
     .replace(/부족해셔/g, '부족해서')
+    .replace(/바힙니다/g, '바뀝니다')
     .replace(/자연 처리/g, '자연어 처리')
     .replace(/구체적으로 해야 돼/g, '구체적으로 해야 합니다')
     .replace(/구체적으로 해야돼/g, '구체적으로 해야 합니다')

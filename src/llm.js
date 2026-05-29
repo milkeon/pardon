@@ -1,11 +1,11 @@
-import { buildConfirmationSummary, buildRewriteVariants, deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=confirm-llm-12';
+import { buildConfirmationSummary, buildRewriteVariants, buildRewriteVariantsFromTranscripts, deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=context-restore-33';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 
 export async function fetchRewriteVariants(input) {
   const request = normalizeRewriteRequest(input);
   if (shouldUseStaticFallback()) {
-    return buildRewriteVariants(request.baseTranscript || request.evidenceTranscript);
+    return buildRewriteVariantsFromTranscripts(request.baseTranscript, request.evidenceTranscript);
   }
 
   const payload = await postJson('/api/analyze', {
