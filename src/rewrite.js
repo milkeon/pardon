@@ -37,8 +37,8 @@ const TRANSCRIPT_STOPWORDS = new Set([
   '아마', '거의', '이미', '이제', '다시', '처음', '현재', '상황', '내용', '부분', '문장', '말', '것들', '여기', '저기'
 ]);
 
-const TECH_EXPLANATION_CONTEXT_RE = /(쿠키|세션|브라우저|서버|로그인|인증|토큰|식별자|캐시|스토리지|로컬스토리지|세션스토리지|cookie|session|browser|server|auth)/i;
-const TECH_EXPLANATION_CUE_RE = /(방식|원리|설명|예를 들어|그러면|그럼|때문에|그래서|저장|관리|요청|응답|데이터|위험|탈취|아이디|비밀번호)/i;
+const TECH_EXPLANATION_CONTEXT_RE = /(쿠키|세션|브라우저|서버|로그인|인증|토큰|식별자|캐시|스토리지|로컬스토리지|로컬 스토리지|세션스토리지|get|post|405|http|method|cookie|session|browser|server|auth|local ?storage)/i;
+const TECH_EXPLANATION_CUE_RE = /(방식|원리|설명|예를 들어|그러면|그럼|때문에|그래서|저장|관리|요청|응답|데이터|위험|탈취|아이디|비밀번호|누락|빠져|오류|에러|메서드|라우터)/i;
 
 export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -389,6 +389,13 @@ function buildTechnicalExplanationBalancedVariant(source, corrected) {
   const hasLoginRouterFlow = /(로그인|login)/i.test(source)
     && /(서버|server)/i.test(source)
     && /(요청|request|post|포스트|라우터|router)/i.test(source);
+  const hasTokenStorageRisk = /(토큰|token)/i.test(source)
+    && /(로컬\s*스토리지|local\s*storage|localstorage)/i.test(source)
+    && /(탈취|위험|세션)/i.test(source);
+  const hasMethod405Flow = /(겟|get)/i.test(source)
+    && /(포스트|post)/i.test(source)
+    && /405/.test(source)
+    && /(빠져|누락|없어)/i.test(source);
 
   if (hasCookieSession && (hasBrowser || hasServer)) {
     return ensureSentenceEnding('세션 방식은 브라우저에서 상태를 관리하는 방식입니다');
@@ -396,6 +403,14 @@ function buildTechnicalExplanationBalancedVariant(source, corrected) {
 
   if (hasLoginRouterFlow) {
     return ensureSentenceEnding('로그인 요청이 서버의 POST 라우터로 아직 연결되지 않았다는 뜻입니다');
+  }
+
+  if (hasTokenStorageRisk) {
+    return ensureSentenceEnding('토큰을 로컬 스토리지에 저장하면 탈취 위험이 커서 세션 기반으로 가는 편이 맞습니다');
+  }
+
+  if (hasMethod405Flow) {
+    return ensureSentenceEnding('라우터에는 GET과 POST가 모두 있어야 하는데 POST가 빠져 있어서 405가 나는 것입니다');
   }
 
   if (hasBrowser && /(세션|session)/i.test(source)) {
@@ -417,6 +432,13 @@ function buildTechnicalExplanationRelaxedVariant(source, corrected) {
   const hasLoginRouterFlow = /(로그인|login)/i.test(source)
     && /(서버|server)/i.test(source)
     && /(요청|request|post|포스트|라우터|router)/i.test(source);
+  const hasTokenStorageRisk = /(토큰|token)/i.test(source)
+    && /(로컬\s*스토리지|local\s*storage|localstorage)/i.test(source)
+    && /(탈취|위험|세션)/i.test(source);
+  const hasMethod405Flow = /(겟|get)/i.test(source)
+    && /(포스트|post)/i.test(source)
+    && /405/.test(source)
+    && /(빠져|누락|없어)/i.test(source);
 
   if (hasCookieSession && (hasBrowser || hasServer)) {
     return ensureSentenceEnding('브라우저는 세션으로 상태를 관리합니다');
@@ -424,6 +446,14 @@ function buildTechnicalExplanationRelaxedVariant(source, corrected) {
 
   if (hasLoginRouterFlow) {
     return ensureSentenceEnding('로그인 요청은 서버의 POST 라우터로 처리되도록 아직 구현이 더 필요합니다');
+  }
+
+  if (hasTokenStorageRisk) {
+    return ensureSentenceEnding('토큰은 로컬 스토리지보다 세션 기반으로 관리하는 편이 더 안전합니다');
+  }
+
+  if (hasMethod405Flow) {
+    return ensureSentenceEnding('GET과 POST가 모두 있어야 하는데 POST 메서드가 빠져 있어서 405 응답이 나는 상황입니다');
   }
 
   if (hasBrowser && /(세션|session)/i.test(source)) {
@@ -1479,7 +1509,9 @@ function applyDomainContextCorrections(text) {
     .replace(/페션/g, '세션')
     .replace(/메론가요/g, '뭔가요')
     .replace(/타피/g, '카피')
+    .replace(/\b겟\b/g, 'GET')
     .replace(/포스트/g, 'POST')
+    .replace(/로컬\s*스토리지/g, '로컬 스토리지')
     .replace(/시 메/g, '시스템')
     .replace(/\s+([,.!?;:])/g, '$1')
     .trim();

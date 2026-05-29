@@ -82,6 +82,11 @@ function hasLocalLlmConfig() {
   return Boolean(cleanBaseUrl(process.env.LOCAL_LLM_BASE_URL || process.env.OPENAI_BASE_URL));
 }
 
+function shouldPreferLocalLlm() {
+  const value = String(process.env.PREFER_LOCAL_LLM || '').trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || hasLocalLlmConfig();
+}
+
 async function requestJson(url, options = {}, timeoutMs = 4000) {
   const controller = new AbortController();
   const scheduleTimeout = globalThis.setTimeout.bind(globalThis);
@@ -165,6 +170,18 @@ async function callChatCompletions({ baseUrl, apiKey = '', model, messages, temp
 }
 
 async function getPreferredChatProvider() {
+  if (shouldPreferLocalLlm()) {
+    const localProvider = await discoverLocalChatProvider();
+    if (localProvider) {
+      return {
+        kind: 'local',
+        baseUrl: localProvider.baseUrl,
+        apiKey: '',
+        model: localProvider.model
+      };
+    }
+  }
+
   if (hasOpenAIKey()) {
     return {
       kind: 'openai',
@@ -206,31 +223,33 @@ async function callOpenAIRewriteVariants(baseTranscript, evidenceTranscript, hin
     ? `
 보조 증거 STT(evidence)는 동일 발화의 재전사 결과입니다. evidence가 base보다 명백히 정확할 때만 반영하십시오.`
     : '';
-  const systemContent = `당신은 한국어 STT 교정 보조기입니다.
+  const systemContent = `당신은 한국어 STT 후처리 전문가가 아니라, 한국어 음성 기록의 문맥 복원(Context Restoration) 전문가입니다.
 화자는 한국어와 영어를 섞어 말할 수 있고, 기술 용어/고유명사/숫자/명령어가 포함될 수 있습니다.
+임무는 baseTranscript를 사람이 실제로 말했을 법한 문장으로 최소 수정 복원하는 것입니다.
 
 핵심 규칙:
 1. baseTranscript를 기준 원문으로 사용하십시오.
 2. evidenceTranscript는 교차검증 증거로만 사용하십시오.${evidenceBlock}
-3. evidenceTranscript가 더 명확한 경우에만 base를 수정하십시오.
-4. 확신이 낮으면 base를 유지하십시오.
-5. 원문에 없는 새 의미를 추가하지 마십시오.
-6. 요약, 과도한 의역, 설명 추가를 하지 마십시오.
-7. 숫자, 시간, 날짜, 파일명, 명령어, 고유명사, 영문 기술 용어는 더 확실한 쪽을 우선하되 확신이 낮으면 base를 유지하십시오.
+3. 발화자의 의도, 정보, 순서를 유지하십시오.
+4. 문맥상 말이 안 되는 단어는 가장 가능성 높은 단어로만 교체하십시오. 예: 힘 단위→팀 단위, 메론가요→뭔가요.
+5. 수정된 부분은 최소화하십시오. 문장을 새로 쓰지 말고 원문을 복원하십시오.
+6. 확신이 낮으면 base를 유지하십시오.
+7. 원문에 없는 새 의미, 새 주장, 새 예시를 추가하지 마십시오.
+8. 숫자, 시간, 날짜, 파일명, 명령어, 고유명사, 영문 기술 용어는 더 확실한 쪽을 우선하되 확신이 낮으면 base를 유지하십시오.
+9. 맞춤법, 띄어쓰기, 조사, 어색한 반복은 고치되, 요약하거나 설명으로 바꾸지 마십시오.
+10. 특히 기술/협업 문맥에서는 의미적으로 자연한 표현을 우선하십시오. 예: 팀 단위, 세션 기반, POST 라우터.${hintBlock}
+11. 긍정/부정, 원인/결과, 주어/대상 관계를 바꾸지 마십시오. 예: 외롭지 않다를 외로워진다로 바꾸지 마십시오.
 
 출력 규칙:
-- v1: 가장 보수적인 교정본. 원문을 최대한 유지하고 명백한 STT 오류만 바로잡으십시오.
-- v2: 균형형 교정본. 원문 의미와 순서를 유지하면서 evidence가 강하게 뒷받침하는 수정만 반영하십시오.
-- v3: 자연형 교정본. 의미는 유지하되 읽기만 조금 더 자연스럽게 정리하십시오.
-- 세 결과는 서로 거의 같은 문장 3개가 아니라, 보정 깊이가 다른 3개여야 합니다.${hintBlock}
-
-반환 형식은 오직 엄격한 JSON 객체 {"v1":"...","v2":"...","v3":"..."} 입니다.`;
+- 단 하나의 복원 결과만 만드십시오.
+- 반환 형식은 오직 엄격한 JSON 객체 {"restored":"..."} 입니다.
+- JSON 바깥의 설명, 코드블록, 머리말은 절대 출력하지 마십시오.`;
   try {
     const content = await callChatCompletions({
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
       model: provider.model,
-      temperature: 0.15,
+      temperature: 0.05,
       responseFormat: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemContent },
@@ -240,21 +259,26 @@ async function callOpenAIRewriteVariants(baseTranscript, evidenceTranscript, hin
 
     const parsed = JSON.parse(content);
     const fallbackVariants = buildRewriteVariants(cleanFallback);
+    const restoredCandidate = normalizeWhitespace(
+      parsed?.restored || parsed?.answer || parsed?.text || parsed?.content || parsed?.v2 || parsed?.v1 || parsed?.v3 || ''
+    );
+    const restored = guardRewriteVariant(cleanFallback, restoredCandidate, fallbackVariants[1]?.text || cleanFallback, 'balanced');
+    const polishedFallback = buildRewriteVariants(restored);
     return [
       {
         id: 'possibility-1',
         label: '제안 1 · 보수적 교정',
-        text: guardRewriteVariant(cleanFallback, parsed?.v1, fallbackVariants[0]?.text || cleanFallback, 'strict')
+        text: guardRewriteVariant(cleanFallback, restoredCandidate, fallbackVariants[0]?.text || cleanFallback, 'strict')
       },
       {
         id: 'possibility-2',
-        label: '제안 2 · 균형형 교정',
-        text: guardRewriteVariant(cleanFallback, parsed?.v2, fallbackVariants[1]?.text || cleanFallback, 'balanced')
+        label: '제안 2 · 문맥 복원',
+        text: restored
       },
       {
         id: 'possibility-3',
-        label: '제안 3 · 자연형 교정',
-        text: guardRewriteVariant(cleanFallback, parsed?.v3, fallbackVariants[2]?.text || cleanFallback, 'relaxed')
+        label: '제안 3 · 자연형 정리',
+        text: guardRewriteVariant(restored, polishedFallback[2]?.text || restored, restored, 'balanced')
       }
     ];
   } catch (error) {

@@ -134,6 +134,28 @@ test('buildRewriteVariants는 UI 설명 STT를 검색바/목록 보기 문맥으
   assert.ok(texts.every((text) => !text.includes('검색바다')));
 });
 
+test('buildRewriteVariants는 토큰/로컬 스토리지 설명을 세션 문맥으로 교정한다', () => {
+  const raw = '유저가 토큰을 로컬 스토리지에 넣어두면 탈취 위험이 커요 그래서 세션 기반으로 가는게 맞아요';
+  const variants = buildRewriteVariants(raw);
+
+  assert.equal(variants.length, 3);
+  assert.ok(variants[0].text.includes('로컬 스토리지'));
+  assert.ok(variants[1].text.includes('탈취 위험'));
+  assert.ok(variants[1].text.includes('세션'));
+  assert.ok(variants[2].text.includes('로컬 스토리지') || variants[2].text.includes('세션'));
+});
+
+test('buildRewriteVariants는 GET/POST 누락 설명을 405 문맥으로 교정한다', () => {
+  const raw = '라우터에 겟 포스트 둘다 있어야 되는데 포스트만 빠져서 405가 나는 거예요';
+  const variants = buildRewriteVariants(raw);
+
+  assert.equal(variants.length, 3);
+  assert.ok(variants[0].text.includes('GET') || variants[0].text.includes('POST'));
+  assert.ok(variants[1].text.includes('405'));
+  assert.ok(variants[1].text.includes('POST'));
+  assert.ok(variants[1].text.includes('빠져'));
+});
+
 test('buildConfirmationSummary는 긴 원문을 붙여도 짧은 확정 요약을 유지한다', () => {
   const selected = '브라우저는 세션을 사용하는 상태를 관리하는 방식입니다.';
   const source = '이름의 섹션에 우리가요 리퀘스트 좀 바디를 이렇게 추가하도록 하겠습니다 자 그러면 이때 이때 보면 새로운 로그인이 있다고 전화 한번 찍어 보세요 그러니까 최초의 최초에 한번 로그인을 했을 때 세션 정보가 일단 들어갈 거고 그러면 이제 내가 두 번째 만약에 최초의 로그인이고 내가 이제 뭐 예를 들어서 뭐 브라우저로 갔다가 다시 만약에 로그인 페이지를 요청을 하게 되면은 그때 이제 엑삭하겠지 어이 POST가 아니라 이번에는 백반집에 로그인 찾아야 될 건데 자 이때 얘는 지금 이게 첫 번째 첫 번째로 모이면이 아니라 이미 로그인된 상태인지 알 수가 없어.';
