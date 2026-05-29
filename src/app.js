@@ -1,8 +1,8 @@
-import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-28';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-28';
-import { mergeRecognitionResults } from './stt.js?v=llm-variants-28';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-28';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-28';
+import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-29';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-29';
+import { mergeRecognitionResults } from './stt.js?v=llm-variants-29';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-29';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-29';
 
 const testHooks = getTestHooks();
 

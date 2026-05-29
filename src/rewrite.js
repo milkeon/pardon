@@ -1172,6 +1172,11 @@ function buildOrganizedVariant(text, profile) {
 function buildDialogueVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {
   const base = normalizeWhitespace(text);
   const cleaned = applyTranscriptCorrections(cleanSpokenKorean(base));
+
+  if (structure.clauses.length === 2) {
+    return ensureSentenceEnding(cleaned);
+  }
+
   const fragments = extractSalientFragments(cleaned, profile, structure, 2);
 
   if (!fragments.length) {
@@ -1204,6 +1209,11 @@ function looksLikeConversation(text) {
 
 function buildSummaryVariant(text, profile = deriveContextProfile(text), structure = analyzeTranscriptStructure(text, profile)) {
   const cleaned = applyTranscriptCorrections(cleanSpokenKorean(text));
+
+  if (structure.clauses.length === 2) {
+    return ensureSentenceEnding(normalizeWhitespace(cleaned));
+  }
+
   const fragments = extractSalientFragments(cleaned, profile, structure, 3);
 
   if (!fragments.length) {
@@ -1259,7 +1269,7 @@ function splitForSpeech(text) {
 function splitTranscriptClauses(text) {
   return normalizeWhitespace(text)
     .replace(/([.!?])/g, '$1|')
-    .replace(/\s+(근데|그리고|그래서|다만|하지만|그런데|또|즉|결국|왜냐하면|시간상|아무튼|아까처럼)\s+/g, '|$1 ')
+    .replace(/\s+(근데|그리고|그래서|다만|하지만|그런데|또|즉|결국|왜냐하면|시간상|아무튼|아까처럼|만약)\s+/g, '|$1 ')
     .split('|')
     .map((sentence) => sentence.trim())
     .filter(Boolean);
