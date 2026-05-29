@@ -70,55 +70,6 @@ async function pickAsset(urlPath) {
   }
 }
 
-// 순수 Node.js만으로 WebM 바이너리 파일을 FormData 규격에 맞게 빌드해 OpenAI Whisper API로 쏘는 헬퍼
-async function callOpenAIWhisper(audioBuffer) {
-  const apiKey = process.env.OPENAI_API_KEY || '';
-  if (!apiKey) throw new Error('서버에 OpenAI API Key 설정이 필요합니다. (.env 확인)');
-
-  const boundary = '----WebKitFormBoundaryPardonSTT' + Math.random().toString(36).substring(2);
-  
-  const header = 
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="recording.webm"\r\n` +
-    `Content-Type: audio/webm\r\n\r\n`;
-  const modelPart = 
-    `\r\n--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="model"\r\n\r\nwhisper-1`;
-  const languagePart = 
-    `\r\n--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="language"\r\n\r\nko`;
-  const promptPart = 
-    `\r\n--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="prompt"\r\n\r\nSQLD, ADsP, 블로그, API, Git, commit, Docker, Database, 포트, 서버, 깃 커밋`;
-  const footer = `\r\n--${boundary}--\r\n`;
-
-  const multipartBody = Buffer.concat([
-    Buffer.from(header),
-    audioBuffer,
-    Buffer.from(modelPart),
-    Buffer.from(languagePart),
-    Buffer.from(promptPart),
-    Buffer.from(footer)
-  ]);
-
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': `multipart/form-data; boundary=${boundary}`
-    },
-    body: multipartBody
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Whisper API Error: ${text}`);
-  }
-
-  const data = await response.json();
-  return data.text || '';
-}
-
 function hasOpenAIKey() {
   return Boolean(String(process.env.OPENAI_API_KEY || '').trim());
 }
@@ -363,26 +314,7 @@ transcript는 의미 보존을 위한 참고 문맥일 뿐이며, 최종 요약�
 
 const server = http.createServer(async (req, res) => {
   try {
-    // 1. Whisper STT 분석 API 엔드포인트
-    if (req.url === '/api/transcribe' && req.method === 'POST') {
-      const chunks = [];
-      req.on('data', (chunk) => chunks.push(chunk));
-      req.on('end', async () => {
-        try {
-          const audioBuffer = Buffer.concat(chunks);
-          const whisperText = await callOpenAIWhisper(audioBuffer);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ text: whisperText }));
-        } catch (err) {
-          console.error('Whisper API 프록시 오류:', err);
-          res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-          res.end(err.message || 'Whisper Proxy Error');
-        }
-      });
-      return;
-    }
-
-    // 2. GPT 문맥 해석 API 엔드포인트
+    // 1. GPT 문맥 해석 API 엔드포인트
     if (req.url === '/api/analyze' && req.method === 'POST') {
       const chunks = [];
       req.on('data', (chunk) => chunks.push(chunk));
@@ -421,7 +353,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 3. 기존 정적 에셋 서빙
+    // 2. 기존 정적 에셋 서빙
     const target = await pickAsset(req.url || '/');
 
     if (!target) {

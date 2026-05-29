@@ -29,19 +29,15 @@ async function transcribeChunkBlobs(sourceBlob, chunks, options = {}) {
     }
 
     const batchChunks = chunks.slice(index, index + batchSize);
-    const texts = [];
-    for (const chunk of batchChunks) {
-      const text = await transcribeBlob(chunk, {
-        transcriber,
-        chunkLengthSeconds,
-        returnEmptyOnError: true
-      });
-      if (text) texts.push(text);
-      await yieldToBrowser();
-    }
+    const batchBlob = new Blob(batchChunks, { type: batchChunks[0]?.type || sourceBlob?.type || 'audio/webm' });
+    const text = await transcribeBlob(batchBlob, {
+      transcriber,
+      chunkLengthSeconds,
+      returnEmptyOnError: true
+    });
 
-    if (texts.length) {
-      transcriptParts.push(texts.join(' '));
+    if (text) {
+      transcriptParts.push(text);
     }
 
     await yieldToBrowser();

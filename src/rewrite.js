@@ -311,12 +311,55 @@ export function buildRewriteVariants(text) {
     return buildTechnicalExplanationRewriteVariants(rawText);
   }
 
+  if (looksLikeUiExplanation(cleanedText)) {
+    return buildUiExplanationRewriteVariants(rawText);
+  }
+
   const profile = deriveContextProfile(rawText);
   if (profile.intent === 'action') {
     return buildActionRewriteVariants(rawText, profile);
   }
   const candidates = buildRewriteCandidatePool(rawText, profile);
   return selectRewriteVariants(rawText, profile, candidates);
+}
+
+function looksLikeUiExplanation(text) {
+  const source = normalizeWhitespace(text).toLowerCase();
+  return /(ui|검색|검색바|목록|리스트|표기|필터|버튼|화면)/i.test(source)
+    && /(추가|보면|하잖아요|되겠지|여기서|어디서)/i.test(source);
+}
+
+function buildUiExplanationRewriteVariants(text) {
+  const source = normalizeWhitespace(text);
+  const corrected = ensureSentenceEnding(
+    source
+      .replace(/요런\s*ui/gi, '이런 UI')
+      .replace(/검색바다/g, '검색바가')
+      .replace(/표기에가/g, '표기에서')
+      .replace(/목록\s*표기에서\s*보시면/g, '목록 보기에서 보시면')
+      .replace(/어디서\s*하나면/g, '어디서 하냐면')
+  );
+  const contextual = ensureSentenceEnding(
+    corrected
+      .replace(/보통\s*검색은\s*어디서\s*하냐면\s*/g, '보통 검색은 ')
+      .replace(/목록에서\s*했잖아요\s*/g, '목록 보기에서 하잖아요. ')
+      .replace(/목록\s*표기에서\s*보시면\s*/g, '목록 보기에서 보면 ')
+      .replace(/이런 UI에서\s*좀\s*/g, '이런 UI에서는 ')
+      .replace(/검색바가\s*추가가\s*되겠지/g, '검색바가 추가되겠죠')
+  );
+  const polished = ensureSentenceEnding(
+    contextual
+      .replace(/보통\s*검색은\s*/g, '')
+      .replace(/^목록 보기에서 하잖아요\.\s*/g, '목록 보기에서 검색하고, ')
+      .replace(/이런 UI에서는\s*/g, '이런 UI에서는 ')
+      .replace(/검색바가 추가되겠죠/g, '검색바를 추가하면 되겠죠')
+  );
+
+  return [
+    { id: 'possibility-1', label: '제안 1 · 오인식 보정', text: corrected },
+    { id: 'possibility-2', label: '제안 2 · 문맥 교정', text: contextual },
+    { id: 'possibility-3', label: '제안 3 · 매끄러운 문장', text: polished }
+  ];
 }
 
 function buildTechnicalExplanationRewriteVariants(text) {

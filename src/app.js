@@ -1,8 +1,8 @@
-import { buildRewriteVariants, normalizeWhitespace } from './rewrite.js?v=llm-variants-27';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-27';
-import { mergeRecognitionResults } from './stt.js?v=llm-variants-27';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-27';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-27';
+import { buildRewriteVariants, compareTranscriptSources, normalizeWhitespace } from './rewrite.js?v=llm-variants-28';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=llm-variants-28';
+import { mergeRecognitionResults } from './stt.js?v=llm-variants-28';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=llm-variants-28';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=llm-variants-28';
 
 const testHooks = getTestHooks();
 
@@ -108,7 +108,7 @@ function initialize() {
 function renderRecordedTranscript() {
   if (!els.recordedTranscript) return;
 
-  const transcriptText = String(state.rawTranscript ?? '');
+  const transcriptText = String(state.recoveredTranscript || state.rawTranscript || '');
   const hasTranscript = Boolean(transcriptText);
   els.recordedTranscript.classList.toggle('empty-state', !hasTranscript);
   els.recordedTranscript.textContent = hasTranscript
@@ -293,20 +293,30 @@ async function handleTranscribeClicked() {
       }
     });
     const normalizedRaw = String(rawTranscript || '');
-    const cleanedTranscript = normalizeWhitespace(buildRewriteVariants(normalizedRaw)[0]?.text || normalizedRaw);
+    const transcriptComparison = compareTranscriptSources(
+      state.liveTranscriptRaw,
+      normalizedRaw,
+      state.transcript || state.liveTranscriptRaw || normalizedRaw
+    );
+    const recoveredTranscript = normalizeWhitespace(transcriptComparison.recoveredText || normalizedRaw);
+    const cleanedTranscript = normalizeWhitespace(buildRewriteVariants(recoveredTranscript)[0]?.text || recoveredTranscript);
 
     state.rawTranscript = normalizedRaw;
-    state.cleanedTranscript = cleanedTranscript || normalizedRaw;
-    state.transcriptComparison = null;
-    state.readyForVariants = Boolean(normalizeWhitespace(state.rawTranscript) && normalizeWhitespace(state.cleanedTranscript));
+    state.recordedTranscriptRaw = normalizedRaw;
+    state.recoveredTranscript = recoveredTranscript || normalizedRaw;
+    state.cleanedTranscript = cleanedTranscript || recoveredTranscript || normalizedRaw;
+    state.transcriptComparison = transcriptComparison;
+    state.readyForVariants = Boolean(normalizeWhitespace(state.rawTranscript) || normalizeWhitespace(state.recoveredTranscript));
 
     renderRecordedTranscript();
     renderVariantPlaceholder(state.readyForVariants ? '변환 버튼을 누르면 원문 기반 LLM 후보 3개를 생성합니다.' : '녹음 파일 STT 결과가 비어 있습니다. 다시 시도해 주세요.');
     renderSelectedDiffSummary();
-    setStatus(state.readyForVariants ? 'STT가 끝났습니다. 이제 변환 버튼으로 원문 기반 후보 3개를 만들 수 있습니다.' : '녹음 파일 STT 결과가 비어 있습니다.');
+    setStatus(state.readyForVariants ? `STT가 끝났습니다. ${transcriptComparison.summary}` : '녹음 파일 STT 결과가 비어 있습니다.');
   } catch (error) {
     state.rawTranscript = '';
     state.cleanedTranscript = '';
+    state.recoveredTranscript = '';
+    state.recordedTranscriptRaw = '';
     state.transcriptComparison = null;
     state.diffModel = null;
     state.diffSelections = {};
@@ -507,37 +517,40 @@ function markChangedTokens(sourceTokens, variantTokens) {
 
 async function handleGenerateClicked() {
   state.readyForVariants = true;
-  const liveTranscript = normalizeWhitespace(state.transcript || state.liveTranscriptRaw);
-  const recordedTranscript = normalizeWhitespace(state.rawTranscript);
+  const liveTranscript = normalizeWhitespace(state.transcript || state.liveTranscriptRaw || state.recoveredTranscript);
+  const recordedTranscript = normalizeWhitespace(state.recoveredTranscript || state.rawTranscript);
 
-  if (!liveTranscript || !recordedTranscript) {
+  if (!liveTranscript && !recordedTranscript) {
     state.variantOptions = [];
     state.selectedVariantId = '';
-    renderVariantPlaceholder('먼저 원문 STT와 녹음 STT가 둘 다 있어야 변환할 수 있습니다.');
-    setStatus('원문 STT와 녹음 STT가 모두 준비되면 후보 3개를 생성할 수 있습니다.');
+    renderVariantPlaceholder('먼저 원문 STT나 녹음 STT가 있어야 변환할 수 있습니다.');
+    setStatus('원문 STT 또는 복구된 녹음 STT가 준비되면 후보 3개를 생성할 수 있습니다.');
     renderSelectedDiffSummary();
     return;
   }
 
+  const baseTranscript = liveTranscript || recordedTranscript;
+  const evidenceTranscript = recordedTranscript && recordedTranscript !== baseTranscript ? recordedTranscript : normalizeWhitespace(state.rawTranscript);
+
   setActionControlsDisabled(true);
   renderVariantPlaceholder('원문을 기준으로 녹음 STT를 교차검증해 후보 3개를 생성하는 중입니다.');
-  setStatus('LLM이 원문 기반 후보 3개를 생성하는 중입니다.');
+  setStatus('변환 엔진이 원문 기반 후보 3개를 생성하는 중입니다.');
 
   try {
     const variants = await fetchRewriteVariants({
-      baseTranscript: liveTranscript,
-      evidenceTranscript: recordedTranscript
+      baseTranscript,
+      evidenceTranscript
     });
-    const safeVariants = Array.isArray(variants) && variants.length ? variants : buildRewriteVariants(liveTranscript);
+    const safeVariants = Array.isArray(variants) && variants.length ? variants : buildRewriteVariants(baseTranscript);
     state.variantOptions = safeVariants;
     state.selectedVariantId = safeVariants[0]?.id || '';
     renderVariants();
     setStatus(`원문 기반 후보 ${safeVariants.length}개를 만들었습니다. 원하는 카드를 고르세요.`);
   } catch (error) {
-    state.variantOptions = buildRewriteVariants(liveTranscript);
+    state.variantOptions = buildRewriteVariants(baseTranscript);
     state.selectedVariantId = state.variantOptions[0]?.id || '';
     renderVariants();
-    setStatus(`LLM 후보 생성에 실패해 로컬 후보로 전환했습니다: ${friendlyError(error)}`);
+    setStatus(`후보 생성에 실패해 로컬 후보로 전환했습니다: ${friendlyError(error)}`);
   } finally {
     setActionControlsDisabled(false);
   }
@@ -718,7 +731,7 @@ function renderConfirmedSummary(summaryText, sourceLabel) {
 }
 
 function setActionControlsDisabled(isBusy) {
-  const hasTranscript = Boolean(normalizeWhitespace(state.rawTranscript) && normalizeWhitespace(state.cleanedTranscript));
+  const hasTranscript = Boolean(normalizeWhitespace(state.rawTranscript) || normalizeWhitespace(state.recoveredTranscript) || normalizeWhitespace(state.cleanedTranscript));
   const hasSelection = Boolean(normalizeWhitespace(getSelectedDiffText()));
   const busy = Boolean(isBusy || state.isTranscribing);
   els.generateButton.disabled = busy || !hasTranscript;
