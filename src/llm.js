@@ -1,4 +1,4 @@
-import { buildConfirmationSummary, buildRewriteVariants, buildRewriteVariantsFromTranscripts, deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=context-restore-33';
+import { buildConfirmationSummary, buildRewriteVariants, buildRewriteVariantsFromTranscripts, deriveContextProfile, normalizeWhitespace } from './rewrite.js?v=context-restore-34';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 

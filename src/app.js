@@ -1,8 +1,8 @@
-import { buildRewriteVariants, buildTranscriptRecovery, normalizeWhitespace } from './rewrite.js?v=context-restore-33';
-import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=context-restore-33';
-import { mergeRecognitionResults } from './stt.js?v=context-restore-33';
-import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=context-restore-33';
-import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=context-restore-33';
+import { buildRewriteVariants, buildTranscriptRecovery, normalizeWhitespace } from './rewrite.js?v=context-restore-34';
+import { transcribeAudioBlob as transcribeAudioBlobImpl } from './asr.js?v=context-restore-34';
+import { mergeRecognitionResults } from './stt.js?v=context-restore-34';
+import { calculateRms, shouldCommitTranscriptLineBreakAfterSilence, shouldInsertLineBreakBeforeNextSpeech, shouldRestartRecognition } from './capture.js?v=context-restore-34';
+import { fetchConfirmationSummary as fetchConfirmationSummaryImpl, fetchRewriteVariants as fetchRewriteVariantsImpl } from './llm.js?v=context-restore-34';
 
 const testHooks = getTestHooks();
 
