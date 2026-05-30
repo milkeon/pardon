@@ -197,6 +197,34 @@ test('Pardon은 녹음 → 정지 → STT → 변환 → 확정 흐름을 테스
   expect(errors).toEqual([]);
 });
 
+test('Pardon은 녹음 STT가 뒤를 더 말해도 원문을 기준으로 두고 뒷부분만 보조로 이어 붙인다', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+
+  const liveTranscript = '원문 stt는 여기까지 맞게 나왔습니다';
+  const recordedTranscript = '원문 stt는 여기까지 맞게 나왔습니다 그리고 뒷부분도 이어서 남아 있습니다';
+  await installBrowserMocks(page, {
+    liveTranscript,
+    recordedTranscript,
+    variants: []
+  });
+  await page.goto('/');
+
+  await page.getByRole('button', { name: '녹음 시작' }).click();
+  await page.getByRole('button', { name: '정지' }).click();
+  const sttButton = page.getByRole('button', { name: 'STT', exact: true });
+  await expect(sttButton).toBeEnabled();
+
+  await sttButton.click();
+  await expect(page.locator('#recorded-transcript')).toContainText('그리고 뒷부분도 이어서 남아 있습니다');
+  await expect(page.locator('#recovered-transcript')).toContainText('그리고 뒷부분도 이어서 남아 있습니다');
+
+  expect(errors).toEqual([]);
+});
+
 test('Pardon은 녹음 STT가 무의미하면 실시간 원문을 기준으로 복구해 보여준다', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));

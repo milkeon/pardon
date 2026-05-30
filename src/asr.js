@@ -9,10 +9,35 @@ export async function transcribeAudioBlob(blob, options = {}) {
 
   const chunks = normalizeBlobChunks(options.chunks);
   if (chunks.length > 0) {
-    return transcribeChunkBlobs(blob, chunks, options);
+    return transcribeBlobWithChunkFallback(blob, chunks, options);
   }
 
   return transcribeBlob(blob, options);
+}
+
+async function transcribeBlobWithChunkFallback(blob, chunks, options = {}) {
+  const transcriber = options.transcriber || (await getTranscriber());
+  const chunkLengthSeconds = normalizePositiveNumber(options.chunkLengthSeconds, DEFAULT_CHUNK_LENGTH_SECONDS);
+
+  try {
+    const fullTranscript = await transcribeBlob(blob, {
+      transcriber,
+      chunkLengthSeconds,
+      returnEmptyOnError: true
+    });
+
+    if (fullTranscript) {
+      return fullTranscript;
+    }
+  } catch {
+    // 전체 blob 전사가 실패하면 청크 전사로 폴백한다.
+  }
+
+  return transcribeChunkBlobs(blob, chunks, {
+    ...options,
+    transcriber,
+    chunkLengthSeconds
+  });
 }
 
 async function transcribeChunkBlobs(sourceBlob, chunks, options = {}) {

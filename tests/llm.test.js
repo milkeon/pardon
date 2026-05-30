@@ -114,6 +114,27 @@ test('fetchRewriteVariants는 원문(base)과 녹음(evidence)을 함께 /api/an
   }
 });
 
+test('buildTranscriptRecovery는 녹음 STT가 더 길어도 원문을 기준으로 두고 필요한 뒷부분만 보조 증거로 붙인다', () => {
+  const live = '원문 stt는 여기까지 맞게 나왔습니다';
+  const recorded = '원문 stt는 여기까지 맞게 나왔습니다 그리고 뒷부분도 이어서 남아 있습니다';
+  const recovery = buildTranscriptRecovery(live, recorded, `${live} ${recorded}`);
+
+  assert.equal(recovery.chosenSource, 'live');
+  assert.match(recovery.summary, /뒷부분만 보조 증거/);
+  assert.ok(recovery.recoveredText.includes('그리고 뒷부분도 이어서 남아 있습니다'));
+});
+
+test('buildTranscriptRecovery는 녹음 STT가 엉뚱하게 달라도 원문을 기준으로 유지한다', () => {
+  const live = '원문 stt와 녹음 stt를 같이 비교해 보겠습니다';
+  const recorded = '갑자기 전혀 다른 문장으로 혼자 진행해 버립니다';
+  const recovery = buildTranscriptRecovery(live, recorded, `${live} ${recorded}`);
+
+  assert.equal(recovery.chosenSource, 'live');
+  assert.match(recovery.summary, /보조 증거로만/);
+  assert.ok(recovery.recoveredText.startsWith('원문 stt와 녹음 stt를 같이 비교해 보겠습니다'));
+  assert.ok(!recovery.recoveredText.includes('갑자기 전혀 다른 문장'));
+});
+
 test('buildTranscriptRecovery는 동일하게 깨진 UI 안내문도 기준 문장에서 바뀝니다로 복구한다', () => {
   const broken = '가장 맞는 카드 하나를 고르면 아래 결과가 바로 바힙니다';
   const recovery = buildTranscriptRecovery(broken, broken, broken);

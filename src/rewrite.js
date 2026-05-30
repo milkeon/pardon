@@ -540,13 +540,14 @@ export function compareTranscriptSources(liveText, recordedText, contextText = '
   const profile = deriveContextProfile(context || live || recorded);
   const liveScore = scoreTranscriptRecoveryCandidate(liveRaw, recordedRaw, context, profile);
   const recordedScore = scoreTranscriptRecoveryCandidate(recordedRaw, liveRaw, context, profile);
-  const chosenSource = recordedScore > liveScore ? 'recorded' : 'live';
-  const recoveredText = (chosenSource === 'recorded' ? recordedRaw : liveRaw).trim();
+  const evidenceMerge = mergeRecordedEvidenceIntoLive(liveRaw, recordedRaw);
+  const chosenSource = 'live';
+  const recoveredText = evidenceMerge.text;
   const summary = live === recorded
     ? '두 STT가 거의 같아서 원문 형태를 유지한 채 복구했습니다.'
-    : chosenSource === 'recorded'
-      ? '녹음 파일 STT가 더 자연스러워서 이를 기준으로 복구했습니다.'
-      : '실시간 받아쓰기가 더 자연스러워서 이를 기준으로 복구했습니다.';
+    : evidenceMerge.usedRecordedTail
+      ? '실시간 받아쓰기를 기준으로 두고 녹음 STT의 뒷부분만 보조 증거로 이어 붙였습니다.'
+      : '실시간 받아쓰기를 기준으로 두고 녹음 STT는 보조 증거로만 반영했습니다.';
 
   return {
     liveText: liveRaw.trim(),
@@ -568,6 +569,48 @@ export function buildTranscriptRecovery(liveText, recordedText, contextText = ''
     ...comparison,
     recoveredText: repaired || recoveredSource
   };
+}
+
+function mergeRecordedEvidenceIntoLive(liveText, recordedText) {
+  const liveRaw = String(liveText ?? '').trim();
+  const recordedRaw = String(recordedText ?? '').trim();
+  const live = normalizeWhitespace(liveRaw);
+  const recorded = normalizeWhitespace(recordedRaw);
+
+  if (!live) {
+    return { text: recordedRaw, usedRecordedTail: Boolean(recorded) };
+  }
+
+  if (!recorded || live === recorded) {
+    return { text: liveRaw, usedRecordedTail: false };
+  }
+
+  if (recorded.startsWith(live) && recorded.length > live.length) {
+    return { text: recordedRaw, usedRecordedTail: true };
+  }
+
+  const liveTokens = live.split(/\s+/).filter(Boolean);
+  const recordedTokens = recorded.split(/\s+/).filter(Boolean);
+  const prefixLength = countMatchingPrefixTokens(liveTokens, recordedTokens);
+
+  if (
+    prefixLength >= Math.max(3, Math.floor(liveTokens.length * 0.6))
+    && recordedTokens.length > liveTokens.length
+    && prefixLength === liveTokens.length
+  ) {
+    return { text: recordedRaw, usedRecordedTail: true };
+  }
+
+  return { text: liveRaw, usedRecordedTail: false };
+}
+
+function countMatchingPrefixTokens(leftTokens, rightTokens) {
+  const limit = Math.min(leftTokens.length, rightTokens.length);
+  let index = 0;
+  while (index < limit && leftTokens[index] === rightTokens[index]) {
+    index += 1;
+  }
+  return index;
 }
 
 export function buildRewriteVariantsFromTranscripts(baseTranscript, evidenceTranscript = '', contextText = '') {
