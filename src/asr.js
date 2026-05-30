@@ -17,6 +17,7 @@ export async function transcribeAudioBlob(blob, options = {}) {
 
 async function transcribeBlobWithChunkFallback(blob, chunks, options = {}) {
   const transcriber = options.transcriber || (await getTranscriber());
+  const batchSize = normalizePositiveNumber(options.batchSize, DEFAULT_BATCH_SIZE);
   const chunkLengthSeconds = normalizePositiveNumber(options.chunkLengthSeconds, DEFAULT_CHUNK_LENGTH_SECONDS);
 
   try {
@@ -27,7 +28,31 @@ async function transcribeBlobWithChunkFallback(blob, chunks, options = {}) {
     });
 
     if (fullTranscript) {
-      return fullTranscript;
+      if (chunks.length <= batchSize) {
+        return fullTranscript;
+      }
+
+      const chunkTranscript = await transcribeChunkBlobs(blob, chunks, {
+        ...options,
+        transcriber,
+        batchSize,
+        chunkLengthSeconds,
+        skipFinalFullFallback: true
+      });
+
+      return selectPreferredTranscript(fullTranscript, chunkTranscript);
+    }
+
+    const chunkTranscript = await transcribeChunkBlobs(blob, chunks, {
+      ...options,
+      transcriber,
+      batchSize,
+      chunkLengthSeconds,
+      skipFinalFullFallback: true
+    });
+
+    if (chunkTranscript) {
+      return chunkTranscript;
     }
   } catch {
     // 전체 blob 전사가 실패하면 청크 전사로 폴백한다.
@@ -36,6 +61,7 @@ async function transcribeBlobWithChunkFallback(blob, chunks, options = {}) {
   return transcribeChunkBlobs(blob, chunks, {
     ...options,
     transcriber,
+    batchSize,
     chunkLengthSeconds
   });
 }
@@ -62,7 +88,7 @@ async function transcribeChunkBlobs(sourceBlob, chunks, options = {}) {
     });
 
     if (text) {
-      transcriptParts.push(text);
+      pushTranscriptPart(transcriptParts, text);
     }
 
     await yieldToBrowser();
@@ -75,6 +101,10 @@ async function transcribeChunkBlobs(sourceBlob, chunks, options = {}) {
   const chunkTranscript = normalizeTranscript(transcriptParts.join(' '));
   if (chunkTranscript) {
     return chunkTranscript;
+  }
+
+  if (options.skipFinalFullFallback) {
+    return '';
   }
 
   return transcribeBlob(sourceBlob, {
@@ -134,6 +164,85 @@ function normalizePositiveNumber(value, fallback) {
 
 function normalizeTranscript(value) {
   return String(value ?? '').trim();
+}
+
+function pushTranscriptPart(parts, text) {
+  const normalizedText = normalizeTranscript(text);
+  if (!normalizedText) {
+    return;
+  }
+
+  const lastPart = parts.at(-1);
+  if (!lastPart) {
+    parts.push(normalizedText);
+    return;
+  }
+
+  if (lastPart === normalizedText || lastPart.startsWith(normalizedText)) {
+    return;
+  }
+
+  if (normalizedText.startsWith(lastPart)) {
+    parts[parts.length - 1] = normalizedText;
+    return;
+  }
+
+  const overlap = findTokenOverlap(lastPart, normalizedText);
+  if (overlap) {
+    const nextTokens = normalizedText.split(/\s+/).filter(Boolean);
+    parts[parts.length - 1] = `${lastPart} ${nextTokens.slice(overlap).join(' ')}`.trim();
+    return;
+  }
+
+  parts.push(normalizedText);
+}
+
+function selectPreferredTranscript(fullTranscript, chunkTranscript) {
+  const full = normalizeTranscript(fullTranscript);
+  const chunk = normalizeTranscript(chunkTranscript);
+
+  if (!full) return chunk;
+  if (!chunk) return full;
+  if (full === chunk) return full;
+
+  const fullTokens = full.split(/\s+/).filter(Boolean);
+  const chunkTokens = chunk.split(/\s+/).filter(Boolean);
+  const prefixLength = countMatchingPrefixTokens(fullTokens, chunkTokens);
+  const minTokenLength = Math.min(fullTokens.length, chunkTokens.length);
+  const tailCompatible = prefixLength >= Math.max(3, Math.floor(minTokenLength * 0.6));
+
+  if (tailCompatible) {
+    return chunkTokens.length > fullTokens.length ? chunk : full;
+  }
+
+  return full;
+}
+
+function countMatchingPrefixTokens(leftTokens, rightTokens) {
+  const limit = Math.min(leftTokens.length, rightTokens.length);
+  let index = 0;
+
+  while (index < limit && leftTokens[index] === rightTokens[index]) {
+    index += 1;
+  }
+
+  return index;
+}
+
+function findTokenOverlap(leftText, rightText) {
+  const leftTokens = normalizeTranscript(leftText).split(/\s+/).filter(Boolean);
+  const rightTokens = normalizeTranscript(rightText).split(/\s+/).filter(Boolean);
+  const maxOverlap = Math.min(leftTokens.length, rightTokens.length);
+
+  for (let size = maxOverlap; size >= 3; size -= 1) {
+    const leftSuffix = leftTokens.slice(-size).join(' ');
+    const rightPrefix = rightTokens.slice(0, size).join(' ');
+    if (leftSuffix === rightPrefix) {
+      return size;
+    }
+  }
+
+  return 0;
 }
 
 function yieldToBrowser() {
