@@ -39,6 +39,17 @@ const TRANSCRIPT_STOPWORDS = new Set([
 
 const TECH_EXPLANATION_CONTEXT_RE = /(쿠키|세션|브라우저|서버|로그인|인증|토큰|식별자|캐시|스토리지|로컬스토리지|로컬 스토리지|세션스토리지|get|post|405|http|method|cookie|session|browser|server|auth|local ?storage)/i;
 const TECH_EXPLANATION_CUE_RE = /(방식|원리|설명|예를 들어|그러면|그럼|때문에|그래서|저장|관리|요청|응답|데이터|위험|탈취|아이디|비밀번호|누락|빠져|오류|에러|메서드|라우터)/i;
+const TECHNICAL_ANCHOR_PATTERNS = [
+  /(세션|session)/i,
+  /(브라우저|browser)/i,
+  /(라우터|router)/i,
+  /(로컬\s*스토리지|local\s*storage|localstorage)/i,
+  /(^|\s)겟(?=\s|$)|\bget\b/i,
+  /(포스트|\bpost\b)/i,
+  /405/,
+  /(쿠키|cookie)/i,
+  /(토큰|token)/i
+];
 
 export function normalizeWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -60,7 +71,16 @@ const REWRITE_ANCHOR_RULES = [
   { test: (sourceLower) => sourceLower.includes('리사이젝트') || sourceLower.includes('리젝트'), targets: ['리다이렉트'] },
   { test: (sourceLower) => sourceLower.includes('자연 처리'), targets: ['자연어 처리'] },
   { test: (sourceLower) => sourceLower.includes('구체적으로 해야 돼') || sourceLower.includes('구체적으로 해야돼'), targets: ['구체적으로 해야 합니다'] },
-  { test: (sourceLower) => sourceLower.includes('명확하게 해야 돼') || sourceLower.includes('명확하게 해야돼'), targets: ['명확하게 해야 합니다'] }
+  { test: (sourceLower) => sourceLower.includes('명확하게 해야 돼') || sourceLower.includes('명확하게 해야돼'), targets: ['명확하게 해야 합니다'] },
+  { test: (sourceLower) => /(세션|session)/i.test(sourceLower), targets: ['세션'] },
+  { test: (sourceLower) => /(브라우저|browser)/i.test(sourceLower), targets: ['브라우저'] },
+  { test: (sourceLower) => /(라우터|router)/i.test(sourceLower), targets: ['라우터'] },
+  { test: (sourceLower) => /(검색바|search ?bar)/i.test(sourceLower), targets: ['검색바'] },
+  { test: (sourceLower) => /(목록|리스트|list)/i.test(sourceLower), targets: ['목록', '목록 보기'] },
+  { test: (sourceLower) => /(로컬\s*스토리지|local\s*storage|localstorage)/i.test(sourceLower), targets: ['로컬 스토리지'] },
+  { test: (sourceLower) => /(^|\s)겟(?=\s|$)|\bget\b/i.test(sourceLower), targets: ['GET'] },
+  { test: (sourceLower) => /(포스트|\bpost\b)/i.test(sourceLower), targets: ['POST'] },
+  { test: (sourceLower) => /405/.test(sourceLower), targets: ['405'] }
 ];
 
 export function guardRewriteVariant(sourceText, candidateText, fallbackText, strictness = 'balanced') {
@@ -95,6 +115,8 @@ function isLikelyRewriteVariant(sourceText, candidateText, strictness = 'balance
   const candidateTokens = buildContentTokenSet(candidate);
   const tokenOverlap = overlapRatio(sourceTokens, candidateTokens);
   const anchorMatch = scoreRewriteAnchors(source, candidate);
+  const sourceTechnicalAnchors = countMatchedPatterns(source, TECHNICAL_ANCHOR_PATTERNS);
+  const candidateTechnicalAnchors = countMatchedPatterns(candidate, TECHNICAL_ANCHOR_PATTERNS);
   const lengthRatio = candidateSignature.length / Math.max(1, sourceSignature.length);
 
   const bounds = strictness === 'strict'
@@ -105,6 +127,14 @@ function isLikelyRewriteVariant(sourceText, candidateText, strictness = 'balance
 
   if (anchorMatch.expected > 0 && anchorMatch.ratio >= bounds.anchorRatio) {
     return lengthRatio >= 0.35 && lengthRatio <= 1.9;
+  }
+
+  if (anchorMatch.expected >= 3 && anchorMatch.ratio < Math.max(0.5, bounds.anchorRatio)) {
+    return false;
+  }
+
+  if (sourceTechnicalAnchors >= 3 && candidateTechnicalAnchors < sourceTechnicalAnchors - 1) {
+    return false;
   }
 
   if (lengthRatio < bounds.min || lengthRatio > bounds.max) {
@@ -189,6 +219,11 @@ function overlapRatio(sourceTokens, candidateTokens) {
   }
 
   return shared / sourceTokens.size;
+}
+
+function countMatchedPatterns(text, patterns) {
+  const source = normalizeWhitespace(text);
+  return patterns.reduce((count, pattern) => count + (pattern.test(source) ? 1 : 0), 0);
 }
 
 export function deriveContextProfile(text = '') {
@@ -340,6 +375,7 @@ function buildUiExplanationRewriteVariants(text) {
       .replace(/바힙니다/g, '바뀝니다')
       .replace(/요런\s*ui/gi, '이런 UI')
       .replace(/검색바다/g, '검색바가')
+      .replace(/검색바가\s*추가가\s*되겠지/g, '검색바가 추가되겠지')
       .replace(/표기에가/g, '표기에서')
       .replace(/목록\s*표기에서\s*보시면/g, '목록 보기에서 보시면')
       .replace(/어디서\s*하나면/g, '어디서 하냐면')
@@ -349,13 +385,17 @@ function buildUiExplanationRewriteVariants(text) {
       .replace(/보통\s*검색은\s*어디서\s*하냐면\s*/g, '보통 검색은 ')
       .replace(/목록에서\s*했잖아요\s*/g, '목록 보기에서 하잖아요. ')
       .replace(/목록\s*표기에서\s*보시면\s*/g, '목록 보기에서 보면 ')
+      .replace(/목록 보기에서 하잖아요\.\s*목록 보기에서 보면\s*/g, '목록 보기에서 하잖아요. ')
+      .replace(/목록 보기에서 하잖아요\.\s*목록 보기에서 보시면\s*/g, '목록 보기에서 하잖아요. ')
       .replace(/이런 UI에서\s*좀\s*/g, '이런 UI에서는 ')
+      .replace(/검색바가\s*추가되겠지/g, '검색바가 추가되겠죠')
       .replace(/검색바가\s*추가가\s*되겠지/g, '검색바가 추가되겠죠')
   );
   const polished = ensureSentenceEnding(
     contextual
       .replace(/보통\s*검색은\s*/g, '')
       .replace(/^목록 보기에서 하잖아요\.\s*/g, '목록 보기에서 검색하고, ')
+      .replace(/목록 보기에서 보시면\s*/g, '목록 보기에서 보면 ')
       .replace(/이런 UI에서는\s*/g, '이런 UI에서는 ')
       .replace(/검색바가 추가되겠죠/g, '검색바를 추가하면 되겠죠')
   );
@@ -458,7 +498,7 @@ function buildTechnicalExplanationRelaxedVariant(source, corrected) {
   }
 
   if (hasMethod405Flow) {
-    return ensureSentenceEnding('GET과 POST가 모두 있어야 하는데 POST 메서드가 빠져 있어서 405 응답이 나는 상황입니다');
+    return ensureSentenceEnding('라우터에는 GET과 POST가 모두 있어야 하는데 POST 메서드가 빠져 있어서 405 응답이 나는 상황입니다');
   }
 
   if (hasBrowser && /(세션|session)/i.test(source)) {
@@ -947,7 +987,7 @@ function selectRewriteVariants(sourceText, profile, candidates) {
     selected.push({
       id: band.id,
       label: band.label,
-      text: ensureSentenceEnding(normalized)
+      text: guardRewriteVariant(sourceText, normalized, sourceText, band.mode)
     });
   }
 
@@ -1597,8 +1637,10 @@ function applyDomainContextCorrections(text) {
     .replace(/페션/g, '세션')
     .replace(/메론가요/g, '뭔가요')
     .replace(/타피/g, '카피')
-    .replace(/\b겟\b/g, 'GET')
+    .replace(/(^|\s)겟(?=\s|$)/g, '$1GET')
     .replace(/포스트/g, 'POST')
+    .replace(/GET\s+POST\s*둘다/g, 'GET과 POST 둘 다')
+    .replace(/GET\s+POST\s*둘\s*다/g, 'GET과 POST 둘 다')
     .replace(/로컬\s*스토리지/g, '로컬 스토리지')
     .replace(/시 메/g, '시스템')
     .replace(/\s+([,.!?;:])/g, '$1')

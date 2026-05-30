@@ -39,7 +39,7 @@ test('index.html exposes the simplified Pardon controls', () => {
 
 test('index.html loads the browser app module and stylesheet', () => {
   assert.ok(html.includes('./styles.css'));
-  assert.ok(html.includes('./src/app.js?v=context-restore-35'));
+  assert.ok(html.includes('./src/app.js?v=context-restore-36'));
 });
 
 test('Pardon file STT path stays browser-local and does not require server-side OpenAI Whisper setup', () => {
